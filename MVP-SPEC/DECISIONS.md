@@ -44,7 +44,8 @@ limiting is replaced by database counting, which stays correct across workers.
 does not exist; `googleReviewUrl` arrives with the session and `/complete` is
 fire-and-forget. §13 and §42's `token_hash` references are obsolete. §42's "never
 use merchantId from the browser after session creation" still holds. §44's event
-list is superseded.
+list is superseded. §19's "replace the currently displayed suggestion batch" is
+reversed by R16a; batches accumulate.
 
 ## Event types
 
@@ -119,6 +120,23 @@ normal for a request the contract calls optional and fires during navigation.
 usable is pointless if the edited text is gone: React state does not survive the
 navigation and `cache: no-store` disables bfcache. The draft is kept in
 tab-scoped `sessionStorage`, keyed by token. The token itself is never stored.
+
+**R16a — suggestions accumulate; a batch is never replaced.** `GET
+/sessions/:token` returns every suggestion in the session, ordered by
+generation then position, and the client appends each new batch rather than
+swapping it in. Replacing was a one-way door: a customer who liked the second
+card, pressed Generate More out of curiosity, and preferred the original had no
+route back to it, and on reaching the five-generation cap was left holding
+whichever batch happened to be last. Since every batch is already stored (R11)
+and rotates topics deliberately (R16), discarding them on screen threw away the
+diversity the rotation exists to produce.
+
+New cards land at the **bottom**, directly above the button that was just
+tapped. Prepending would place them off-screen above the customer's scroll
+position, which reads as nothing having happened.
+
+This reverses `frontend-spec.md` §19's "replace the currently displayed
+suggestion batch". The upper bound is 5 generations × 3 = 15 cards.
 
 **Operational fix — nginx no longer logs the request line.** Session tokens
 travel in the URL path, so `"$request"` wrote live capability keys into the

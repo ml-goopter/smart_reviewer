@@ -73,20 +73,18 @@ def get_session(
         user_agent=request.headers.get("user-agent"),
     )
 
+    # Every batch, not just the newest. Generating more used to discard what
+    # was on screen, so a customer who liked the second card in batch two and
+    # pressed the button once more could never get it back — and at the cap
+    # they were left with whichever batch happened to be last, with no way to
+    # return. The batches accumulate instead, in the order they were written.
     suggestions = db.scalars(
         select(SmartReviewSuggestion)
         .where(SmartReviewSuggestion.session_id == session.id)
-        # Only the newest batch: the customer is looking at three cards, and
-        # earlier generations are history, not current options.
-        .where(
-            SmartReviewSuggestion.generation_number
-            == select(SmartReviewSuggestion.generation_number)
-            .where(SmartReviewSuggestion.session_id == session.id)
-            .order_by(SmartReviewSuggestion.generation_number.desc())
-            .limit(1)
-            .scalar_subquery()
+        .order_by(
+            SmartReviewSuggestion.generation_number,
+            SmartReviewSuggestion.position,
         )
-        .order_by(SmartReviewSuggestion.position)
     ).all()
 
     db.commit()

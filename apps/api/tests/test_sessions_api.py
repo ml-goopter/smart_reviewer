@@ -217,13 +217,8 @@ def test_completed_session_remains_usable(client, merchant, db):
     assert client.get(f"{CREATE}/{token}").status_code == 200
 
 
-def test_only_the_newest_generation_is_returned(client, merchant, db):
-    """The customer is looking at one batch of cards; earlier generations are
-    history, not current options."""
-    token = _create(client, merchant).json()["token"]
-    session = db.scalars(select(SmartReviewSession)).one()
-
-    for generation in (1, 2):
+def _seed_batches(db, session, merchant, generations):
+    for generation in generations:
         for position in (1, 2, 3):
             db.add(
                 SmartReviewSuggestion(
@@ -236,10 +231,82 @@ def test_only_the_newest_generation_is_returned(client, merchant, db):
             )
     db.flush()
 
+
+def test_every_generation_is_returned(client, merchant, db):
+    """Generating more adds to what is on screen rather than replacing it.
+
+    Replacing meant a customer who liked the second card of batch two and
+    pressed the button once more could never get it back, and at the cap was
+    left with whatever batch happened to be last.
+    """
+    token = _create(client, merchant).json()["token"]
+    session = db.scalars(select(SmartReviewSession)).one()
+    _seed_batches(db, session, merchant, (1, 2, 3))
+
     suggestions = client.get(f"{CREATE}/{token}").json()["suggestions"]
 
-    assert len(suggestions) == 3
-    assert all("Suggestion 2-" in item["text"] for item in suggestions)
-    assert [item["text"][-len("about the food.") :] for item in suggestions] == [
-        "about the food."
-    ] * 3
+    assert len(suggestions) == 9
+    assert {item["text"][:12] for item in suggestions} == {
+        "Suggestion 1",
+        "Suggestion 2",
+        "Suggestion 3",
+    }
+
+
+def test_generations_are_returned_oldest_first(client, merchant, db):
+    """Order is generation then position, so the newest batch lands at the
+    bottom of the list — directly where the customer just tapped Generate
+    More, rather than off-screen above them."""
+    token = _create(client, merchant).json()["token"]
+    session = db.scalars(select(SmartReviewSession)).one()
+    _seed_batches(db, session, merchant, (1, 2))
+
+    texts = [item["text"] for item in client.get(f"{CREATE}/{token}").json()["suggestions"]]
+
+    assert texts == [
+        f"Suggestion {generation}-{position} about the food."
+        for generation in (1, 2)
+        for position in (1, 2, 3)
+    ]
+
+
+def test_batches_written_out_of_order_still_come_back_in_order(client, merchant, db):
+    """Ordering comes from generation_number, not insertion order — a refunded
+    or retried generation can write a lower number after a higher one."""
+    token = _create(client, merchant).json()["token"]
+    session = db.scalars(select(SmartReviewSession)).one()
+    _seed_batches(db, session, merchant, (3, 1, 2))
+
+    texts = [item["text"] for item in client.get(f"{CREATE}/{token}").json()["suggestions"]]
+
+    assert texts == sorted(texts)
+
+
+def test_suggestions_from_another_session_are_never_included(client, merchant, db):
+    """The session filter is the only thing keeping one customer's cards out of
+    another's, on a page that shows every batch rather than the last one."""
+    mine = _create(client, merchant).json()["token"]
+    _create(client, merchant)
+
+    first, second = db.scalars(
+        select(SmartReviewSession).order_by(SmartReviewSession.created_at)
+    ).all()
+    owner = first if first.token == mine else second
+    other = second if owner is first else first
+
+    _seed_batches(db, owner, merchant, (1,))
+    db.add(
+        SmartReviewSuggestion(
+            session_id=other.id,
+            merchant_id=merchant.id,
+            generation_number=1,
+            position=1,
+            text_="Somebody else's suggestion about the food.",
+        )
+    )
+    db.flush()
+
+    texts = [item["text"] for item in client.get(f"{CREATE}/{mine}").json()["suggestions"]]
+
+    assert len(texts) == 3
+    assert not any("Somebody else" in text for text in texts)
