@@ -15,49 +15,55 @@ docker compose exec api python -m app.seed merchants/*.yaml # load merchants
 open http://localhost:8080
 ```
 
-Nothing runs migrations automatically, so a fresh clone starts with an empty
+Nothing runs migrations automatically yet, so a fresh clone starts with an empty
 database until `alembic upgrade head` is run. The seed script is the only
 merchant onboarding path — there is no admin UI — and it prints each merchant's
-permanent `/m/:merchantId` URL, which is what goes into the QR code.
-
-Both commands are safe to re-run: migrations are versioned, and the seed upserts
-on `slug`. Editing a merchant means editing its YAML and running it again.
+permanent `/m/:merchantId` URL, which is what goes into the QR code. It upserts
+on `slug`, so editing a merchant means editing its YAML and running it again.
 
 | Service | Purpose |
 |---|---|
-| `nginx` | Single public origin on `:8080`. `/api/*` → api, everything else → web |
-| `web` | Next.js. Dev mode with source mounted; hot reload works through nginx |
-| `api` | FastAPI. Source mounted, `--reload` |
+| `web` | nginx on `:8080`. Serves the built SPA; proxies `/api/*` and `/m/*` to the API |
+| `api` | FastAPI on `:8000`. Source mounted, `--reload` |
 | `db` | Postgres 16, exposed on host `:5433` for psql |
 
+nginx and the SPA are one service because in production the SPA is not a
+process — it is a directory of files nginx reads. There is no Node runtime.
+
+## Frontend development
+
+The compose `web` service builds a production image, so it is the wrong loop for
+UI work. Run Vite on the host instead:
+
 ```bash
-docker compose exec api python -m pytest    # API tests
-docker compose exec web npx tsc --noEmit    # web typecheck
+cd apps/web && npm install
+npm run dev              # http://localhost:5173
+```
+
+Vite proxies `/api` and `/m` straight to the API's published port, so the whole
+flow — including scanning `/m/:merchantId` — works at `:5173` with nginx out of
+the picture. `vite.config.ts` and `nginx/nginx.conf` express the same routing
+split and must stay in step: a path served by one and not the other works in
+development and dead-ends in production.
+
+```bash
+cd apps/web
+npm run typecheck
+npm test
+```
+
+```bash
+docker compose exec api python -m pytest              # API tests
 docker compose exec db psql -U reviewer -d reviewer   # or psql -h localhost -p 5433
 ```
 
-End-to-end, against the running stack:
+API tests build their own scratch database by running the migration, so they
+cannot pass against a schema the migration does not actually produce.
+
+After changing anything under `apps/web/`, rebuild the image to see it on
+`:8080` — the bundle is baked in, not mounted:
 
 ```bash
-cd apps/web && npm ci && npx playwright install chromium
-E2E_MERCHANT_ID=$(docker compose -f ../../docker-compose.yml exec -T db \
-  psql -U reviewer -d reviewer -tA -c "select id from merchants where slug='pho37';" | tr -d '\r') \
-  npx playwright test
-```
-
-The E2E suite stubs suggestion generation, so it costs nothing and is
-deterministic. It exists for the one thing API tests cannot reach: the clipboard
-write, which needs a real browser, a real user gesture, and a secure context.
-
-Tests build their own scratch database by running the migration, so they cannot
-pass against a schema the migration does not actually produce.
-
-After changing `apps/web/package.json`, refresh the dependency volume —
-compose reuses it across rebuilds, so a new package would otherwise never
-appear in the container:
-
-```bash
-docker compose down web && docker volume rm smart_reviewer_web_modules
 docker compose up -d --build web
 ```
 
@@ -80,8 +86,9 @@ The compose file listens on port 80 only. Production terminates TLS at nginx.
 
 ```
 apps/api/     FastAPI · SQLAlchemy · Alembic · provider adapters
-apps/web/     Next.js · TypeScript · Tailwind v4
-nginx/        reverse proxy config
+apps/web/     Vite · React · TypeScript · plain CSS
+nginx/        reverse proxy + static serving config
+mockups/      accepted visual direction, screen by screen
 merchants/    per-merchant YAML, loaded by the seed script
 MVP-SPEC/     requirements — DECISIONS.md is authoritative
 ```
@@ -94,17 +101,16 @@ were resolved deliberately, not by accident.
 ## Flow
 
 ```
-QR → /m/:merchantId ──server-side──▶ POST /api/review/sessions
+QR → /m/:merchantId ──FastAPI──▶ creates the session
                                        │
-                              307 → /r/:token
+                              302 → /r/:token
                                        │
-     GET /api/review/sessions/:token ──┤  merchant name in first paint,
-                                       │  never generates
+     GET /api/review/sessions/:token ──┤  merchant name as soon as it lands;
+                                       │  never generates (R4)
      POST .../suggestions ─────────────┤  batch 1, then Generate More (max 5)
      POST .../select ──────────────────┤  records the choice, copies nothing
                                        │
-     copy on click → instruction screen → POST .../complete (keepalive,
-                                          not awaited) → Google
+     copy on click → POST .../complete (keepalive, not awaited) → Google
 ```
 
 ## AI provider
