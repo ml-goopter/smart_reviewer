@@ -1,3 +1,20 @@
+# The API image and its database wiring, shared by the service that serves
+# requests and the one-shot that migrates. An anchor rather than a second copy,
+# so the two can never drift onto different images or different DATABASE_URLs —
+# which would show up as a migration that ran somewhere nothing reads.
+x-api: &api
+  build:
+    context: ./apps/api
+    args:
+      INSTALL_DEV: 'true'
+  environment: &api-env
+    DATABASE_URL: postgresql+psycopg://reviewer:reviewer@db:5432/reviewer
+  volumes:
+    - ./apps/api:/srv
+    # Seed data is configuration, not application code, so it lives at the repo
+    # root and is mounted read-only rather than copied into the image.
+    - ./merchants:/srv/merchants:ro
+
 services:
   db:
     image: postgres:16-alpine
@@ -18,13 +35,28 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Runs the migration once and exits. `docker compose up` blocks the API on it
+  # completing successfully, so a fresh clone needs no separate step and the API
+  # can never come up against a schema that was never migrated.
+  #
+  # A one-shot service rather than an entrypoint in the API container: an
+  # entrypoint runs once per replica and once per --reload restart, so several
+  # workers would race each other into the same `alembic upgrade`. This runs
+  # exactly once per `up`, and a failure is visible as a non-zero exit rather
+  # than a crash-looping API.
+  migrate:
+    <<: *api
+    command: ['alembic', 'upgrade', 'head']
+    # Compose would otherwise treat the clean exit as a crash and start it again.
+    restart: 'no'
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
-    build:
-      context: ./apps/api
-      args:
-        INSTALL_DEV: 'true'
+    <<: *api
     environment:
-      DATABASE_URL: postgresql+psycopg://reviewer:reviewer@db:5432/reviewer
+      <<: *api-env
       # Declared here, next to the proxy that makes it true. The API defaults
       # this off so that running it without nginx never trusts client headers.
       TRUST_PROXY_HEADERS: 'true'
@@ -42,13 +74,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     # Source mount + reload: the API is the surface that changes most during
     # the build, and rebuilding an image per edit is the slowest possible loop.
-    volumes:
-      - ./apps/api:/srv
-      # Seed data is configuration, not application code, so it lives at the
-      # repo root and is mounted read-only rather than copied into the image.
-      - ./merchants:/srv/merchants:ro
     command: ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000', '--reload']
     healthcheck:
       test: ['CMD-SHELL', 'python -c "import urllib.request;urllib.request.urlopen(''http://127.0.0.1:8000/api/health'')"']

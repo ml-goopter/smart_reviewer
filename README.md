@@ -9,22 +9,39 @@ the merchant's official Google review page with the text on their clipboard.
 
 ```bash
 cp .env.example .env                                        # add an OPENAI_API_KEY
-docker compose up -d
-docker compose exec api alembic upgrade head                # create the schema
+docker compose up -d                                        # migrates, then starts
 docker compose exec api python -m app.seed merchants/*.yaml # load merchants
 open http://localhost:8080
 ```
 
-Nothing runs migrations automatically yet, so a fresh clone starts with an empty
-database until `alembic upgrade head` is run. The seed script is the only
-merchant onboarding path — there is no admin UI — and it prints each merchant's
-permanent `/m/:merchantId` URL, which is what goes into the QR code. It upserts
-on `slug`, so editing a merchant means editing its YAML and running it again.
+**Migrations run themselves.** A one-shot `migrate` service runs
+`alembic upgrade head` and exits; the API waits on it completing successfully,
+so the schema is always current before anything serves a request and a fresh
+clone needs no separate step.
+
+It is a service rather than an entrypoint inside the API container on purpose:
+an entrypoint runs once per replica and again on every `--reload` restart, so
+several workers would race each other into the same upgrade. This runs exactly
+once per `up`, and a failed migration stops the API from starting at all rather
+than leaving it to crash-loop against a half-built schema.
+
+```bash
+docker compose logs migrate            # what it did
+docker compose run --rm migrate        # re-run on demand
+docker compose run --rm migrate alembic downgrade -1
+docker compose run --rm migrate alembic revision --autogenerate -m "..."
+```
+
+Seeding stays explicit — it is the only merchant onboarding path, there is no
+admin UI, and it prints each merchant's permanent `/m/:merchantId` URL, which is
+what goes into the QR code. It upserts on `slug`, so editing a merchant means
+editing its YAML and running it again.
 
 | Service | Purpose |
 |---|---|
 | `web` | nginx on `:8080`. Serves the built SPA; proxies `/api/*` and `/m/*` to the API |
 | `api` | FastAPI on `:8000`. Source mounted, `--reload` |
+| `migrate` | One-shot `alembic upgrade head`, then exits. The API waits on it |
 | `db` | Postgres 16, exposed on host `:5433` for psql |
 
 nginx and the SPA are one service because in production the SPA is not a
