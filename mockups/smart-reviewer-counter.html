@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Reviewer — Counter (mockups)</title>
+<style>
+  /* ---------- Page chrome (theme-aware) ---------- */
+  :root{
+    --bg:#F4F7F4; --panel:#FFFFFF; --ink:#16201B; --muted:#5C6B63; --faint:#93A099;
+    --hair:#DCE7E0; --accent:#17976A;
+    --mono:"SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --shadow:0 1px 2px rgba(20,40,30,.05),0 22px 46px -22px rgba(20,40,30,.30);
+
+    /* ---- Counter theme tokens (the committed app palette) ---- */
+    --rv-bg:#F4F7F4; --rv-surface:#FFFFFF; --rv-surface-2:#EAF2ED;
+    --rv-ink:#16201B; --rv-muted:#5C6B63;
+    --rv-accent:#17976A; --rv-accent-ink:#FFFFFF; --rv-accent-strong:#0F7B56;
+    --rv-accent-soft:#E4F1EA; --rv-border:#DCE7E0;
+    --rv-display:"Avenir Next","Segoe UI",system-ui,-apple-system,sans-serif;
+    --rv-body:"Avenir Next","Segoe UI",system-ui,-apple-system,sans-serif;
+    --rv-label:var(--mono);
+    --rv-radius:14px; --rv-btnr:11px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0E100E; --panel:#171A16; --ink:#E9EBE5; --muted:#9AA096; --faint:#6E736A;
+      --hair:#282C26; --accent:#34D399;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 26px 50px -24px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#F4F7F4; --panel:#FFFFFF; --ink:#16201B; --muted:#5C6B63; --faint:#93A099;
+    --hair:#DCE7E0; --accent:#17976A;
+    --shadow:0 1px 2px rgba(20,40,30,.05),0 22px 46px -22px rgba(20,40,30,.30);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0E100E; --panel:#171A16; --ink:#E9EBE5; --muted:#9AA096; --faint:#6E736A;
+    --hair:#282C26; --accent:#34D399;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 26px 50px -24px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--ui);
+    padding:clamp(20px,4vw,54px) clamp(16px,4vw,44px) 90px; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1240px; margin:0 auto}
+
+  .eyebrow{
+    font-family:var(--mono); font-size:12px; letter-spacing:.24em; text-transform:uppercase;
+    color:var(--muted); display:flex; align-items:center; gap:10px;
+  }
+  .eyebrow::before{content:""; width:26px; height:1px; background:var(--accent)}
+  h1{font-size:clamp(28px,4.6vw,46px); line-height:1.03; letter-spacing:-.02em; margin:.5rem 0 0; font-weight:660; text-wrap:balance; max-width:18ch}
+  .dek{margin:.9rem 0 0; color:var(--muted); font-size:16px; line-height:1.55; max-width:64ch}
+  .masthead{padding-bottom:26px; border-bottom:1px solid var(--hair)}
+  .legend{display:flex; gap:10px; flex-wrap:wrap; margin-top:20px}
+  .legend .chip{display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11.5px; color:var(--muted); letter-spacing:.02em; border:1px solid var(--hair); border-radius:999px; padding:6px 11px}
+  .legend .chip i{width:13px; height:13px; border-radius:4px; border:1px solid rgba(120,120,120,.25)}
+
+  /* gallery grid of phones */
+  .gallery{
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+    gap:clamp(22px,3vw,40px); margin-top:40px; align-items:start;
+  }
+  .cell{display:flex; flex-direction:column; gap:14px; align-items:center}
+  .cell-hd{width:100%; max-width:390px; display:flex; align-items:baseline; justify-content:space-between; gap:10px}
+  .cell-name{font-size:15px; font-weight:620}
+  .cell-note{font-family:var(--mono); font-size:11px; color:var(--faint); letter-spacing:.02em; text-align:right}
+
+  .phone{width:100%; max-width:390px; border-radius:44px; padding:12px; background:linear-gradient(160deg,#2a2c28,#141513); box-shadow:var(--shadow); position:relative}
+  @media (prefers-color-scheme:dark){ .phone{background:linear-gradient(160deg,#3a3d37,#0c0d0b)} }
+  .phone-inner{border-radius:33px; overflow:hidden; background:var(--rv-bg); position:relative; height:720px}
+  .notch{position:absolute; top:0; left:50%; transform:translateX(-50%); width:128px; height:26px; background:#141513; border-radius:0 0 16px 16px; z-index:20}
+
+  .rv-app{
+    height:100%; overflow-y:auto; overflow-x:hidden; scrollbar-width:none;
+    background:var(--rv-bg); color:var(--rv-ink); font-family:var(--rv-body);
+    padding:44px 22px 30px; display:flex; flex-direction:column; gap:20px;
+  }
+  .rv-app::-webkit-scrollbar{display:none}
+
+  .rv-brand{font-family:var(--rv-label); font-size:12px; letter-spacing:.26em; text-transform:uppercase; color:var(--rv-muted); text-align:center}
+  .rv-merchant{font-family:var(--rv-display); font-size:30px; line-height:1.05; letter-spacing:-.02em; text-align:center; margin:0; overflow-wrap:break-word; font-weight:680}
+  .rv-cat{font-family:var(--rv-label); font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--rv-muted); text-align:center}
+  .rv-q{font-family:var(--rv-display); font-size:21px; line-height:1.2; text-align:center; margin:0; font-weight:660; letter-spacing:-.02em}
+  .rv-lead{font-size:14.5px; line-height:1.5; text-align:center; color:var(--rv-muted); margin:0; max-width:34ch; align-self:center; overflow-wrap:break-word}
+  .rv-head{display:flex; flex-direction:column; gap:9px; align-items:center}
+  .rv-divider{border:none; border-top:1px solid var(--rv-border); margin:2px 0; width:100%}
+
+  .rv-cards{display:flex; flex-direction:column; gap:12px}
+  .rv-card{background:var(--rv-surface); border:1px solid var(--rv-border); border-radius:var(--rv-radius); padding:16px 16px 15px; display:flex; flex-direction:column; gap:13px}
+  .rv-stext{margin:0; font-size:16px; line-height:1.42; overflow-wrap:break-word}
+
+  .rv-btn{width:100%; border:none; cursor:pointer; padding:13px 14px; border-radius:var(--rv-btnr); font-family:var(--rv-label); font-size:12.5px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; line-height:1; transition:filter .15s}
+  .rv-btn:focus-visible{outline:2px solid var(--rv-accent); outline-offset:2px}
+  .rv-primary{background:var(--rv-accent); color:var(--rv-accent-ink)}
+  .rv-primary:hover{filter:brightness(1.05)}
+  .rv-line{background:transparent; color:var(--rv-ink); border:1.5px solid var(--rv-border); padding:12px 14px}
+  .rv-line:hover{border-color:var(--rv-accent); color:var(--rv-accent)}
+
+  .rv-own{display:flex; flex-direction:column; gap:10px; align-items:center; text-align:center}
+  .rv-own .rv-hint{font-size:13.5px; color:var(--rv-muted)}
+  .rv-link{background:none; border:none; cursor:pointer; color:var(--rv-ink); font-family:var(--rv-label); font-size:13px; letter-spacing:.06em; text-decoration:underline; text-underline-offset:4px; text-decoration-color:var(--rv-accent); text-decoration-thickness:1.5px; padding:6px}
+  .rv-auth{font-size:12px; line-height:1.5; color:var(--rv-muted); text-align:center; background:var(--rv-accent-soft); border-radius:10px; padding:12px 14px; overflow-wrap:break-word}
+
+  .rv-center{height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:0 30px; text-align:center}
+  .rv-brand-lg{font-family:var(--rv-label); font-size:15px; letter-spacing:.34em; text-transform:uppercase; color:var(--rv-ink)}
+  .rv-spin{width:34px; height:34px; border-radius:50%; border:2.5px solid var(--rv-border); border-top-color:var(--rv-accent); animation:rvspin .9s linear infinite}
+  @keyframes rvspin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){ .rv-spin{animation-duration:2.4s} }
+  .rv-load-txt{color:var(--rv-muted); font-size:15px}
+
+  .rv-field{position:relative}
+  .rv-ta{width:100%; min-height:150px; resize:none; border-radius:var(--rv-radius); border:1.5px solid var(--rv-border); background:var(--rv-surface); color:var(--rv-ink); font-family:var(--rv-body); font-size:16px; line-height:1.5; padding:15px 40px 15px 15px}
+  .rv-ta:focus{outline:none; border-color:var(--rv-accent)}
+  .rv-reset{position:absolute; right:11px; top:11px; z-index:2; width:22px; height:22px; display:grid; place-items:center; cursor:pointer; background:none; color:var(--rv-muted); border:none; padding:0; transition:color .15s}
+  .rv-reset:hover{color:var(--rv-accent)}
+  .rv-reset:focus-visible{outline:2px solid var(--rv-accent); outline-offset:2px; border-radius:4px}
+  .rv-reset:disabled{opacity:.4; cursor:default}
+  .rv-reset svg{width:15px; height:15px}
+  .rv-actions{display:flex; flex-direction:column; gap:10px}
+
+  .rv-check{width:56px; height:56px; border-radius:50%; display:grid; place-items:center; background:var(--rv-accent-soft); color:var(--rv-accent-strong); font-size:26px; margin:0 auto}
+  .rv-h-title{font-family:var(--rv-display); font-size:23px; margin:0; font-weight:680; letter-spacing:-.02em}
+  .rv-msg{font-family:var(--rv-display); font-size:20px; line-height:1.3; margin:0; font-weight:660}
+  .rv-sub{color:var(--rv-muted); font-size:15px; margin:0}
+
+  .footer{margin-top:56px; padding-top:22px; border-top:1px solid var(--hair); font-family:var(--mono); font-size:11.5px; color:var(--faint); letter-spacing:.03em; display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Smart Reviewer · Direction A — Counter</div>
+    <h1>Fast, honest, hygienic — like a well-made checkout.</h1>
+    <p class="dek">The chosen direction. Cool near-white ground, deep spring-green accent, monospace labels for a considered, product-grade feel. Every screen in the <b>/r/:token</b> flow, mobile-first at 390px.</p>
+    <div class="legend">
+      <span class="chip"><i style="background:#F4F7F4"></i>Ground&nbsp;#F4F7F4</span>
+      <span class="chip"><i style="background:#16201B"></i>Ink&nbsp;#16201B</span>
+      <span class="chip"><i style="background:#17976A"></i>Leaf&nbsp;#17976A</span>
+      <span class="chip"><i style="background:#EAF2ED"></i>Mist&nbsp;#EAF2ED</span>
+      <span class="chip"><i style="background:#DCE7E0"></i>Line&nbsp;#DCE7E0</span>
+    </div>
+  </header>
+
+  <div class="gallery">
+
+    <!-- Loading -->
+    <div class="cell">
+      <div class="cell-hd"><span class="cell-name">Loading</span><span class="cell-note">first fetch · GET /sessions/:token</span></div>
+      <div class="phone"><div class="phone-inner"><div class="notch"></div>
+        <div class="rv-app">
+          <div class="rv-center">
+            <div class="rv-brand-lg">Goopter</div>
+            <div class="rv-spin" role="status" aria-label="Preparing your review"></div>
+            <div class="rv-load-txt">Preparing your review…</div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Suggestions -->
+    <div class="cell">
+      <div class="cell-hd"><span class="cell-name">Suggestions</span><span class="cell-note">state: suggestions</span></div>
+      <div class="phone"><div class="phone-inner"><div class="notch"></div>
+        <div class="rv-app">
+          <div class="rv-head">
+            <div class="rv-brand">Goopter</div>
+            <h1 class="rv-merchant">Pho 37</h1>
+            <div class="rv-cat">Vietnamese Restaurant</div>
+          </div>
+          <hr class="rv-divider">
+          <div class="rv-head">
+            <h2 class="rv-q">How was your experience?</h2>
+            <p class="rv-lead">Here are a few ideas to help you write your review.</p>
+          </div>
+          <div class="rv-cards">
+            <article class="rv-card">
+              <p class="rv-stext">The food was delicious and the service was friendly and fast.</p>
+              <button class="rv-btn rv-primary">Use this review</button>
+            </article>
+            <article class="rv-card">
+              <p class="rv-stext">Great Vietnamese food with generous portions and a welcoming atmosphere.</p>
+              <button class="rv-btn rv-primary">Use this review</button>
+            </article>
+            <article class="rv-card">
+              <p class="rv-stext">Really enjoyed the meal and would happily come back.</p>
+              <button class="rv-btn rv-primary">Use this review</button>
+            </article>
+          </div>
+          <button class="rv-btn rv-line">Generate more suggestions</button>
+          <div class="rv-own">
+            <span class="rv-hint">Prefer to write your own?</span>
+            <button class="rv-link">Continue to Google →</button>
+          </div>
+          <p class="rv-auth">Only use wording that reflects your genuine experience. You can edit any suggestion before posting.</p>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Editor -->
+    <div class="cell">
+      <div class="cell-hd"><span class="cell-name">Editor</span><span class="cell-note">state: selected</span></div>
+      <div class="phone"><div class="phone-inner"><div class="notch"></div>
+        <div class="rv-app">
+          <div class="rv-head"><div class="rv-brand">Goopter</div></div>
+          <hr class="rv-divider">
+          <div class="rv-head">
+            <h2 class="rv-q">Make it your own</h2>
+            <p class="rv-lead">You can edit this suggestion before continuing to Google.</p>
+          </div>
+          <div class="rv-field">
+            <textarea class="rv-ta" aria-label="Your review">The beef pho was delicious and our server was really friendly — we'll definitely be back.</textarea>
+            <button class="rv-reset" type="button" aria-label="Reset to suggestion" title="Reset to suggestion">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            </button>
+          </div>
+          <div class="rv-actions">
+            <button class="rv-btn rv-primary">Continue to Google Reviews</button>
+          </div>
+          <p class="rv-auth">Only use wording that reflects your genuine experience.</p>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Handoff -->
+    <div class="cell">
+      <div class="cell-hd"><span class="cell-name">Handoff</span><span class="cell-note">state: redirecting · deliberate 2nd tap</span></div>
+      <div class="phone"><div class="phone-inner"><div class="notch"></div>
+        <div class="rv-app">
+          <div class="rv-center">
+            <div class="rv-check" aria-hidden="true">✓</div>
+            <h2 class="rv-h-title">Your review is copied</h2>
+            <p class="rv-lead">Paste it into the review box on Google, add your star rating, and post.</p>
+            <button class="rv-btn rv-primary" style="max-width:280px">Open Google Reviews →</button>
+            <p class="rv-sub" style="font-size:13px">Smart Reviewer stops here — your review is yours to post.</p>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Unavailable -->
+    <div class="cell">
+      <div class="cell-hd"><span class="cell-name">Unavailable / Invalid</span><span class="cell-note">/unavailable · 404 · 410</span></div>
+      <div class="phone"><div class="phone-inner"><div class="notch"></div>
+        <div class="rv-app">
+          <div class="rv-center">
+            <div class="rv-brand">Goopter</div>
+            <p class="rv-msg">This review link is no longer available.</p>
+            <p class="rv-sub">Please ask the business for assistance.</p>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    <span>Smart Reviewer MVP — Counter direction · mobile-first 375–430px</span>
+    <span>plain-text AI · edit-in-place · Google handoff</span>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,98 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: reviewer
+      POSTGRES_PASSWORD: reviewer
+      POSTGRES_DB: reviewer
+    ports:
+      # Exposed so Alembic and psql can run from the host without exec'ing
+      # into a container.
+      - '5433:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U reviewer -d reviewer']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./apps/api
+      args:
+        INSTALL_DEV: 'true'
+    environment:
+      DATABASE_URL: postgresql+psycopg://reviewer:reviewer@db:5432/reviewer
+      # Declared here, next to the proxy that makes it true. The API defaults
+      # this off so that running it without nginx never trusts client headers.
+      TRUST_PROXY_HEADERS: 'true'
+      # Salts stored IP hashes. The IPv4 space is small enough to brute-force,
+      # so an unsalted hash would make the privacy claim decorative.
+      IP_HASH_SALT: ${IP_HASH_SALT:-dev-only-change-me}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Source mount + reload: the API is the surface that changes most during
+    # the build, and rebuilding an image per edit is the slowest possible loop.
+    volumes:
+      - ./apps/api:/srv
+      # Seed data is configuration, not application code, so it lives at the
+      # repo root and is mounted read-only rather than copied into the image.
+      - ./merchants:/srv/merchants:ro
+    command: ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000', '--reload']
+    healthcheck:
+      test: ['CMD-SHELL', 'python -c "import urllib.request;urllib.request.urlopen(''http://127.0.0.1:8000/api/health'')"']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      # Stop at `deps`: it has node_modules but no source, which arrives via
+      # the mount below. Building the production image for every edit would
+      # add a full `next build` to each change. Omit `target` to build the
+      # real production image.
+      target: deps
+    working_dir: /srv
+    command: ['npm', 'run', 'dev']
+    volumes:
+      - ./apps/web:/srv
+      # Named, not anonymous: compose re-attaches an existing anonymous volume
+      # even after a rebuild, so a newly added dependency would never appear in
+      # the container. Named means `docker volume rm smart_reviewer_web_modules`
+      # refreshes it without `down -v`, which would also destroy pgdata.
+      - web_modules:/srv/node_modules
+    environment:
+      # Server-side only. The browser never sees this: it reaches the API
+      # through nginx on the same origin, which is what keeps CORS out of the
+      # picture entirely.
+      INTERNAL_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - '8080:80'
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  web_modules:
