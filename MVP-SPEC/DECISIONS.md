@@ -14,7 +14,7 @@ contradicted each other in several places.
 | R6 | Rate limiting | Atomic DB `generation_count < 5` per session; 60/hour per IP on create, counted in the database |
 | R7 | Completion | A milestone, not a gate. Validation reads `expires_at` and `disabled_at` only — never `status` |
 | R8 | Session TTL | 24 hours |
-| R9 | Handoff UX | Instruction screen with a deliberate second tap; absorbs the clipboard-failure state |
+| R9 | Handoff UX | ~~Instruction screen with a deliberate second tap~~ → **revised: instructions on the editor, Continue redirects directly.** See R9b |
 | R10 | AI provider | OpenAI SDK as transport; model via `OPENAI_MODEL`, endpoint via `OPENAI_BASE_URL` |
 | R11 | Bad batches | Store every suggestion that validates (1–3). Zero valid → one retry → 502 **and refund the cap slot** |
 | R12 | Topology | Monorepo, nginx reverse proxy, single origin, no CORS. **Frontend revised: Vite SPA, static build, no server** |
@@ -44,8 +44,11 @@ limiting is replaced by database counting, which stays correct across workers.
 does not exist; `googleReviewUrl` arrives with the session and `/complete` is
 fire-and-forget. §13 and §42's `token_hash` references are obsolete. §42's "never
 use merchantId from the browser after session creation" still holds. §44's event
-list is superseded. §19's "replace the currently displayed suggestion batch" is
-reversed by R16a; batches accumulate.
+list is superseded. §28's "Opening Google…" screen and §29's clipboard-failure
+screen are both removed by R9b/R9c — Continue redirects directly and a failed
+copy is silent. §19's "replace the currently displayed suggestion batch" is
+reversed by R16a; batches accumulate. §22 and §25's `[ Reset ]` button is an
+icon inside the textarea in the accepted design.
 
 ## Event types
 
@@ -137,6 +140,30 @@ position, which reads as nothing having happened.
 
 This reverses `frontend-spec.md` §19's "replace the currently displayed
 suggestion batch". The upper bound is 5 generations × 3 = 15 cards.
+
+**R9b — the instructions move to the editor and the handoff screen is removed.**
+R9 put "paste this into Google" on a screen *after* the tap, which is the moment
+the customer has already decided to leave and is least willing to read. The same
+sentences sit above the Continue button instead, where they are read before the
+decision, and **Continue to Google Reviews is a direct redirect** — one tap, on
+both the edited path and the skip path. The reviewer has two stages, not three.
+
+**R9c — a failed clipboard write is silent.** R9's handoff screen existed partly
+to absorb clipboard failure; with it gone there is nowhere to put a fallback, and
+one was deliberately not reinvented elsewhere. `navigator.clipboard` is absent on
+insecure origins and unreliable inside in-app browser WebViews, but neither is
+judged frequent enough to spend a screen and an extra tap on. The customer always
+reaches Google; on those origins they arrive without the text.
+
+Two consequences, both accepted:
+
+* `review_copied` is **optimistic**. `writeText` rejects asynchronously, so the
+  flag records that the API existed and was called, not that the text landed.
+  Awaiting the result to find out would reintroduce the delay before the redirect
+  that this decision removes.
+* HTTPS remains a functional requirement (risk 2 above), and now fails *quietly*
+  rather than visibly. A non-TLS deployment degrades to a plain link to Google
+  with no error anywhere the customer or the operator can see.
 
 **Operational fix — nginx no longer logs the request line.** Session tokens
 travel in the URL path, so `"$request"` wrote live capability keys into the
