@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+
+    <!-- viewport-fit=cover so the ground colour reaches the edges on notched
+         phones; the app pads itself back off the unsafe areas in index.css. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#F4F7F4" />
+
+    <!-- The session token is in the path. Without this, following the link to
+         Google would put a live capability key in the Referer header sent to a
+         third party. -->
+    <meta name="referrer" content="no-referrer" />
+
+    <!-- Nothing here is a search result: /r/:token is private and single-use,
+         and /unavailable is an error page. Deliberately generic, so the tab
+         title and browser history do not record which business was visited. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Write a review</title>
+
+    <!-- Inlined rather than left to the stylesheet: this covers the ~300ms of
+         empty shell between first paint and React mounting, which is the first
+         thing a customer sees after scanning a QR code. A white flash there is
+         the most likely moment to lose them. -->
+    <style>
+      html { background: #f4f7f4; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
