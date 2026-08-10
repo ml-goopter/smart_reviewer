@@ -14,10 +14,12 @@ docker compose exec api python -m pytest tests/unit     # or, with the deps inst
 pytest tests/unit                                       # anywhere, no containers
 ```
 
-Routes, pure functions, and configuration. The seam nearest the code under test
-is replaced — `dependency_overrides` for the request-scoped `Session`,
-`monkeypatch.setattr` for the service a router calls — and the test asserts on
-both the response coming back and the arguments going out.
+Routes, pure functions, and configuration. `conftest.py` here builds a review
+API with nothing behind it: the request-scoped `Session` is a stub, and every
+service a router calls is scripted, so a test states the outcome it wants and
+asserts on the translation. The substitutions are `dependency_overrides` for
+the session and the provider, and `monkeypatch.setattr` for the services, and a
+test asserts on the arguments going out as well as the response coming back.
 
 A failure here points at the code. It cannot be a stopped container, a stale
 schema, or another test's leftover rows.
@@ -46,6 +48,12 @@ pass while production broke.
 The scratch database is built by running the migration, not
 `Base.metadata.create_all` — the migration is what production executes, and
 hand-edits to it would otherwise be untested.
+
+Where a route and a service both have a stake, they are tested twice on purpose
+and the assertions differ. `POST /select` returning 409 for a suggestion from
+another session is a route test — it maps an error to a status. That the rule is
+`suggestion.session_id == session.id` is an integration test, because a stub
+would only confirm what it was told to raise.
 
 ## Which layer does a new test belong in?
 

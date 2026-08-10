@@ -1,5 +1,4 @@
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -15,20 +14,6 @@ def _create(client, merchant):
 # --- POST /sessions -------------------------------------------------------
 
 
-def test_create_returns_201_and_a_token(client, merchant):
-    response = _create(client, merchant)
-
-    assert response.status_code == 201
-    token = response.json()["token"]
-    # 32 bytes urlsafe-encoded. Short enough for a URL, long enough that
-    # guessing is not a strategy.
-    assert len(token) >= 40
-
-
-def test_create_response_contains_only_the_token(client, merchant):
-    """The merchant is resolved from the session afterwards; returning any
-    merchant data here would invite the client to hold on to it."""
-    assert set(_create(client, merchant).json()) == {"token"}
 
 
 def test_tokens_are_unique_per_session(client, merchant):
@@ -74,48 +59,9 @@ def test_expiry_is_set_to_the_configured_ttl(client, merchant, db):
     assert abs((session.expires_at - expected).total_seconds()) < 60
 
 
-def test_unknown_merchant_is_404(client):
-    response = client.post(CREATE, json={"merchantId": str(uuid4())})
-
-    assert response.status_code == 404
 
 
-def test_malformed_merchant_id_is_400_not_422(client):
-    """The contract specifies 400; FastAPI's default 422 also volunteers a
-    field-by-field breakdown that a public endpoint should not."""
-    response = client.post(CREATE, json={"merchantId": "not-a-uuid"})
 
-    assert response.status_code == 400
-
-
-def test_inactive_merchant_is_409(client, merchant, db):
-    merchant.status = "INACTIVE"
-    db.flush()
-
-    assert _create(client, merchant).status_code == 409
-
-
-def test_merchant_without_google_url_is_409(client, merchant, db):
-    merchant.google_review_url = None
-    db.flush()
-
-    assert _create(client, merchant).status_code == 409
-
-
-def test_unavailable_reasons_are_indistinguishable(client, merchant, db):
-    """Whether a business is inactive, archived, or never finished setup is the
-    merchant's private information, not something a public URL should reveal."""
-    merchant.status = "ARCHIVED"
-    db.flush()
-    archived = _create(client, merchant)
-
-    merchant.status = "ACTIVE"
-    merchant.google_review_url = None
-    db.flush()
-    no_url = _create(client, merchant)
-
-    assert archived.status_code == no_url.status_code == 409
-    assert archived.json() == no_url.json()
 
 
 def test_rate_limit_returns_429_after_the_hourly_cap(client, merchant, db):
@@ -128,24 +74,6 @@ def test_rate_limit_returns_429_after_the_hourly_cap(client, merchant, db):
 # --- GET /sessions/{token} ------------------------------------------------
 
 
-def test_get_returns_the_public_payload(client, merchant):
-    token = _create(client, merchant).json()["token"]
-
-    body = client.get(f"{CREATE}/{token}").json()
-
-    assert body["merchant"] == {"name": "Pho 37", "category": "Vietnamese Restaurant"}
-    assert body["googleReviewUrl"] == "https://example.test/writereview"
-    assert body["suggestions"] == []
-    assert "expiresAt" in body["session"]
-
-
-def test_get_never_leaks_internal_fields(client, merchant):
-    token = _create(client, merchant).json()["token"]
-
-    raw = client.get(f"{CREATE}/{token}").text
-
-    for leaked in ("merchant_id", "google_place_id", "token", "slug", "created_ip_hash"):
-        assert leaked not in raw
 
 
 def test_get_does_not_generate_suggestions(client, merchant, db):
@@ -182,9 +110,6 @@ def test_get_records_session_opened(client, merchant, db):
 
     assert len(events) == 1
 
-
-def test_unknown_token_is_404(client):
-    assert client.get(f"{CREATE}/nosuchtoken").status_code == 404
 
 
 def test_expired_session_is_410(client, merchant, db):

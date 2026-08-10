@@ -1,6 +1,5 @@
 import json
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -31,16 +30,6 @@ def _session_with_suggestions(api, merchant) -> tuple[str, list[dict]]:
 
 # --- select ---------------------------------------------------------------
 
-
-def test_select_returns_selected_true(api, merchant):
-    token, suggestions = _session_with_suggestions(api, merchant)
-
-    response = api.post(
-        f"{CREATE}/{token}/select", json={"suggestionId": suggestions[0]["id"]}
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"selected": True}
 
 
 def test_select_records_the_choice(api, merchant, db):
@@ -82,24 +71,7 @@ def test_selecting_another_sessions_suggestion_is_409(api, merchant, db):
     assert session.selected_suggestion_id is None
 
 
-def test_selecting_an_unknown_suggestion_is_404(api, merchant):
-    token, _ = _session_with_suggestions(api, merchant)
 
-    response = api.post(f"{CREATE}/{token}/select", json={"suggestionId": str(uuid4())})
-
-    assert response.status_code == 404
-
-
-def test_malformed_suggestion_id_is_400(api, merchant):
-    token, _ = _session_with_suggestions(api, merchant)
-
-    assert api.post(f"{CREATE}/{token}/select", json={"suggestionId": "nope"}).status_code == 400
-
-
-def test_missing_suggestion_id_is_400(api, merchant):
-    token, _ = _session_with_suggestions(api, merchant)
-
-    assert api.post(f"{CREATE}/{token}/select", json={}).status_code == 400
 
 
 def test_select_on_expired_session_is_410(api, merchant, db):
@@ -129,17 +101,6 @@ def test_select_may_be_changed(api, merchant, db):
 
 # --- complete -------------------------------------------------------------
 
-
-def test_complete_returns_204(api, merchant):
-    token, suggestions = _session_with_suggestions(api, merchant)
-
-    response = api.post(
-        f"{CREATE}/{token}/complete",
-        json={"suggestionId": suggestions[0]["id"], "reviewCopied": True},
-    )
-
-    assert response.status_code == 204
-    assert response.content == b""
 
 
 def test_complete_records_the_milestone_and_copy_outcome(api, merchant, db):
@@ -180,36 +141,7 @@ def test_session_stays_usable_after_completion(api, merchant):
     assert api.post(f"{CREATE}/{token}/suggestions").status_code == 201
 
 
-def test_complete_without_a_suggestion_is_accepted(api, merchant, db):
-    """The skip-suggestions path: no selection, no clipboard action."""
-    token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
 
-    response = api.post(f"{CREATE}/{token}/complete", json={"reviewCopied": False})
-
-    assert response.status_code == 204
-
-    session = db.scalars(select(SmartReviewSession)).one()
-    db.refresh(session)
-    assert session.status == "COMPLETED"
-    assert session.selected_suggestion_id is None
-
-
-def test_complete_with_an_empty_body_is_accepted(api, merchant):
-    """Fired during unload; a truncated body must not become an error the
-    client will never see."""
-    token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
-
-    assert api.post(f"{CREATE}/{token}/complete", json={}).status_code == 204
-
-
-def test_complete_ignores_unknown_extra_fields(api, merchant):
-    token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
-
-    response = api.post(
-        f"{CREATE}/{token}/complete", json={"reviewCopied": True, "somethingElse": 1}
-    )
-
-    assert response.status_code == 204
 
 
 def test_complete_never_writes_another_sessions_suggestion(api, merchant, db):
@@ -259,52 +191,7 @@ def test_complete_on_expired_session_is_410(api, merchant, db):
 # --- regressions from adversarial review ----------------------------------
 
 
-def test_complete_accepts_a_request_with_no_body_at_all(api, merchant):
-    """Fired during unload. A declared Pydantic body would make this a 400,
-    and the contract calls the body optional."""
-    token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
 
-    response = api.post(f"{CREATE}/{token}/complete")
-
-    assert response.status_code == 204
-
-
-def test_complete_accepts_a_sendbeacon_content_type(api, merchant, db):
-    """navigator.sendBeacon sends text/plain;charset=UTF-8 and cannot be made
-    to send anything else — and the contract recommends sendBeacon by name."""
-    token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
-
-    response = api.post(
-        f"{CREATE}/{token}/complete",
-        content='{"reviewCopied": true}',
-        headers={"Content-Type": "text/plain;charset=UTF-8"},
-    )
-
-    assert response.status_code == 204
-
-    event = db.scalars(
-        select(SmartReviewEvent).where(
-            SmartReviewEvent.event_type == "SESSION_COMPLETED"
-        )
-    ).one()
-    assert event.event_metadata == {"review_copied": True}
-
-
-def test_complete_accepts_a_body_truncated_by_unload(api, merchant, db):
-    """The milestone is worth more than the payload."""
-    token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
-
-    response = api.post(
-        f"{CREATE}/{token}/complete",
-        content='{"reviewCopied": tr',
-        headers={"Content-Type": "application/json"},
-    )
-
-    assert response.status_code == 204
-
-    session = db.scalars(select(SmartReviewSession)).one()
-    db.refresh(session)
-    assert session.status == "COMPLETED"
 
 
 def test_deactivated_merchant_closes_its_live_sessions(api, merchant, db):
