@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.services.suggestions import _CLAIM_GENERATION
-from tests.conftest import TEST_DATABASE_URL
+from tests.integration.conftest import TEST_DATABASE_URL
 
 CAP = 5
 

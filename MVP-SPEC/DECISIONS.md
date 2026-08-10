@@ -20,7 +20,7 @@ contradicted each other in several places.
 | R12 | Topology | Monorepo, nginx reverse proxy, single origin, no CORS. **Frontend revised: Vite SPA, static build, no server** |
 | R13 | Onboarding | YAML seed files, idempotent upsert on `slug`, review URL derived from `google_place_id` |
 | R14 | Events | Six server-observable types only |
-| R15 | Testing | pytest integration tests against real Postgres + one Playwright E2E |
+| R15 | Testing | Two pytest layers — mocked unit tests, plus integration tests against real Postgres for what only Postgres verifies — and one Playwright E2E. See R15a |
 | R16 | Diversity | One topic per suggestion, rotating by generation; prior batches as an avoid-list |
 
 ## Corrections to the other documents
@@ -151,6 +151,25 @@ position, which reads as nothing having happened.
 
 This reverses `frontend-spec.md` §19's "replace the currently displayed
 suggestion batch". The upper bound is 5 generations × 3 = 15 cards.
+
+**R15a — the suite is two layers, and the default is mocked.** R15 read as
+"integration tests against real Postgres", which made a database the price of
+running any test at all. Most of them did not need one: a route test asserting a
+status code and a header used Postgres only as somewhere to put a row, so a
+stopped container or another test's leftover data failed it for reasons that had
+nothing to do with the code.
+
+`tests/unit/` substitutes everything outward — `dependency_overrides` for the
+request-scoped `Session`, `monkeypatch.setattr` for the service a router calls —
+and runs with no containers. `tests/integration/` keeps a real Postgres and is
+deliberately small, holding only properties the database itself provides: the
+unique index on `token`, the CHECK constraints, the atomic conditional `UPDATE`
+behind the generation cap, R6b's refund race, and the seed's idempotent upsert
+on `slug`. Mocking those would assert that a stub does what it was told.
+
+The test to apply when adding one: if a failure would mean "the code is wrong",
+it is a unit test; if it would mean "the schema or the transaction is wrong", it
+is an integration test.
 
 **R9b — the instructions move to the editor and the handoff screen is removed.**
 R9 put "paste this into Google" on a screen *after* the tap, which is the moment

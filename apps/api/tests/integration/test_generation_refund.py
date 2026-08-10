@@ -16,8 +16,8 @@ from sqlalchemy import create_engine, text
 
 from app.config import get_settings
 from app.services.suggestions import _CLAIM_GENERATION, _RELEASE_GENERATION
-from tests.conftest import TEST_DATABASE_URL
-from tests.test_suggestions import GOOD, StubProvider
+from tests.integration.conftest import TEST_DATABASE_URL
+from tests.integration.test_suggestions import GOOD, StubProvider
 
 CREATE = "/api/review/sessions"
 

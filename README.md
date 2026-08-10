@@ -88,12 +88,18 @@ npm test
 ```
 
 ```bash
-docker compose exec api python -m pytest              # API tests
+docker compose exec api python -m pytest tests/unit   # no database needed
+docker compose exec api python -m pytest              # both layers
 docker compose exec db psql -U reviewer -d reviewer   # or psql -h localhost -p 5433
 ```
 
-API tests build their own scratch database by running the migration, so they
-cannot pass against a schema the migration does not actually produce.
+The suite is split by whether the database is the subject or the scaffolding —
+`tests/unit/` mocks everything outward and runs with no containers,
+`tests/integration/` keeps a real Postgres for what only Postgres verifies. See
+`apps/api/tests/README.md`.
+
+Integration tests build their own scratch database by running the migration, so
+they cannot pass against a schema the migration does not actually produce.
 
 After changing anything under `apps/web/`, rebuild the image to see it on
 `:8080` — the bundle is baked in, not mounted:

@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.models import Merchant, SmartReviewEvent, SmartReviewSession, SmartReviewSuggestion
 from app.routers.review import get_provider
-from tests.test_suggestions import GOOD, StubProvider
+from tests.integration.test_suggestions import GOOD, StubProvider
 
 CREATE = "/api/review/sessions"
 
