@@ -1,0 +1,513 @@
+/* Smart Reviewer — Direction A, "Counter".
+ *
+ * Values are taken from mockups/smart-reviewer-counter.html and are deliberate,
+ * not approximations: the type scale is uneven (14.5px, 12.5px) because it was
+ * tuned against real strings at 390px. Change them there first.
+ *
+ * Light only. The mockup redefines its page chrome under prefers-color-scheme
+ * but never the app tokens, so the reviewer surface is the same in both — one
+ * committed palette, matching the printed material a customer is standing next
+ * to when they scan.
+ */
+
+:root {
+  /* Merchant names and AI output are both unbounded and arrive from outside.
+   * `anywhere`, not `break-word`: only `anywhere` also shrinks the element's
+   * min-content width, and a flex item that will not shrink forces horizontal
+   * scroll at 375px — which §35 forbids outright. */
+  --wrap: anywhere;
+
+  --bg: #f4f7f4;
+  --surface: #ffffff;
+  --surface-2: #eaf2ed;
+  --ink: #16201b;
+  --muted: #5c6b63;
+
+  --accent: #17976a;
+  --accent-ink: #ffffff;
+  --accent-strong: #0f7b56;
+  --accent-soft: #e4f1ea;
+  --border: #dce7e0;
+
+  --display: 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --body: 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* Labels and buttons. No web font is loaded anywhere in this app: a font
+   * request on the critical path competes with the session fetch, and the
+   * merchant's name is the thing that has to arrive first. */
+  --label: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+
+  --radius: 14px;
+  --btn-radius: 11px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  -webkit-font-smoothing: antialiased;
+  /* iOS enlarges text in landscape without this, which breaks the 375px
+   * single-column assumption the whole layout rests on. */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Desktop shows the same interface, centred. There is no separate layout. */
+.app {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100svh;
+  padding: calc(28px + env(safe-area-inset-top)) 22px
+    calc(30px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  /* Belt to the braces on --wrap below. A flex item's automatic minimum size
+   * is its min-content width, which for an unbreakable string is the whole
+   * string — so without this the item refuses to shrink and overflows the
+   * viewport no matter what the text wraps to. */
+  overflow-x: hidden;
+}
+
+.app > * {
+  min-width: 0;
+}
+
+/* Terminal and loading screens centre their content in the same frame. */
+.app--center {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 22px;
+  padding-left: 30px;
+  padding-right: 30px;
+}
+
+/* --- type ---------------------------------------------------------------- */
+
+.brand {
+  font-family: var(--label);
+  font-size: 12px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+
+.brand--lg {
+  font-size: 15px;
+  letter-spacing: 0.34em;
+  color: var(--ink);
+}
+
+.merchant {
+  font-family: var(--display);
+  font-size: 30px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-weight: 680;
+  text-align: center;
+  margin: 0;
+  overflow-wrap: var(--wrap);
+}
+
+.category {
+  font-family: var(--label);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+  overflow-wrap: var(--wrap);
+}
+
+.question {
+  font-family: var(--display);
+  font-size: 21px;
+  line-height: 1.2;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+  text-align: center;
+  margin: 0;
+}
+
+.lead {
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  text-align: center;
+  margin: 0;
+  max-width: 34ch;
+  align-self: center;
+  overflow-wrap: var(--wrap);
+}
+
+.title {
+  font-family: var(--display);
+  font-size: 23px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.message {
+  font-family: var(--display);
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 660;
+  margin: 0;
+}
+
+.sub {
+  color: var(--muted);
+  font-size: 15px;
+  margin: 0;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  align-items: center;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2px 0;
+  width: 100%;
+}
+
+/* --- buttons ------------------------------------------------------------- */
+
+.btn {
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  padding: 13px 14px;
+  border-radius: var(--btn-radius);
+  font-family: var(--label);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1;
+  /* 44px minimum touch target: 13+13 padding + 12.5px line-height rounds to
+   * 39px, so the min-height carries the rest. */
+  min-height: 44px;
+  transition: filter 0.15s;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn--line {
+  background: transparent;
+  color: var(--ink);
+  border: 1.5px solid var(--border);
+  padding: 12px 14px;
+}
+
+.btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Hover is decoration only — §35 forbids anything that depends on it, and a
+ * touch device holds :hover after a tap. */
+@media (hover: hover) {
+  .btn--primary:not([disabled]):hover {
+    filter: brightness(1.05);
+  }
+
+  .btn--line:not([disabled]):hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}
+
+.link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink);
+  font-family: var(--label);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  /* 44px tall. This is the guaranteed route to Google for anyone the AI
+   * failed, so it is the last control that should be hard to hit. */
+  padding: 13px 10px;
+  min-height: 44px;
+}
+
+.link[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* --- suggestion cards ---------------------------------------------------- */
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 16px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.card__text {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.42;
+  overflow-wrap: var(--wrap);
+}
+
+/* --- editor -------------------------------------------------------------- */
+
+.field {
+  position: relative;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 150px;
+  resize: none;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--body);
+  /* Never below 16px: iOS Safari zooms the viewport on focus otherwise, and
+   * the customer is left scrolled sideways in the middle of editing. */
+  font-size: 16px;
+  line-height: 1.5;
+  padding: 15px 40px 15px 15px;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* The icon stays the 22px the mockup drew; the hit area does not. WCAG 2.2 AA
+ * puts the floor at 24px and §35 asks for large touch targets, and this is the
+ * only control that undoes an edit. Negative offsets keep the glyph exactly
+ * where it was designed to sit. */
+.reset {
+  position: absolute;
+  right: 0;
+  top: 0;
+  margin: 0;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  background: none;
+  color: var(--muted);
+  border: none;
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.reset[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.reset svg {
+  width: 15px;
+  height: 15px;
+}
+
+@media (hover: hover) {
+  .reset:not([disabled]):hover {
+    color: var(--accent);
+  }
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* --- notices ------------------------------------------------------------- */
+
+.authenticity {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  text-align: center;
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0;
+  overflow-wrap: var(--wrap);
+}
+
+.own {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  text-align: center;
+}
+
+.own__hint {
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+/* Generation failure and the rate-limit notice. Sits inline above the cards so
+ * the existing suggestions stay usable — an optional failure must never
+ * replace work the customer has already done. */
+.notice {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 15px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  text-align: center;
+}
+
+.notice__text {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+/* --- spinner and skeleton ------------------------------------------------ */
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.skeleton {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton__line {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.skeleton__line:last-child {
+  width: 62%;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Reduced motion still needs *some* signal that work is in flight — stopping
+ * the animation entirely would make a slow generation look like a dead app. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+
+  .skeleton__line {
+    animation-duration: 3s;
+  }
+}
+
+.check {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 26px;
+  margin: 0 auto;
+}
+
+/* Announcements for screen readers with no visual counterpart. Not
+ * display:none — that removes it from the accessibility tree too. */
+.question:focus,
+.message:focus,
+.merchant:focus,
+.title:focus {
+  /* These take focus only programmatically, on a stage change, so a screen
+   * reader starts reading in the right place. They are not interactive, and a
+   * focus ring around a heading reads as a rendering fault. Keyboard users are
+   * unaffected — nothing here is reachable by Tab. */
+  outline: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

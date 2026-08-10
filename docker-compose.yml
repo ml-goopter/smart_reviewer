@@ -1,3 +1,38 @@
+# The API image and its database wiring, shared by the service that serves
+# requests and the one-shot that migrates. An anchor rather than a second copy,
+# so the two can never drift onto different images or different DATABASE_URLs —
+# which would show up as a migration that ran somewhere nothing reads.
+x-api: &api
+  build:
+    context: ./apps/api
+    args:
+      INSTALL_DEV: 'true'
+  # Everything a deployment may override comes from the repo-root .env, whole.
+  # Listing variables one by one meant a `${VAR:-default}` fallback beside every
+  # one, which is a second place the value was written — and the copies drifted.
+  # config.py holds the defaults; this file sets only what it cannot know.
+  env_file:
+    # Absent on a fresh clone, and the stack should still start: every setting
+    # except the two secrets has a working default.
+    - path: .env
+      required: false
+  environment: &api-env
+    # Topology, not policy. The code defaults to the host-published port so it
+    # runs outside Docker; `db` resolves only inside the compose network.
+    DATABASE_URL: postgresql+psycopg://reviewer:reviewer@db:5432/reviewer
+    # Where those two files land. Outside Docker the tests walk up instead.
+    REPO_ROOT: /repo
+  volumes:
+    - ./apps/api:/srv
+    # Seed data is configuration, not application code, so it lives at the repo
+    # root and is mounted read-only rather than copied into the image.
+    - ./merchants:/srv/merchants:ro
+    # The two repo-level files the config tests read. Only apps/api is mounted,
+    # so without these the drift check would silently skip inside the container
+    # — which is where the documented `pytest` command runs it.
+    - ./.env.example:/repo/.env.example:ro
+    - ./docker-compose.yml:/repo/docker-compose.yml:ro
+
 services:
   db:
     image: postgres:16-alpine
@@ -18,32 +53,44 @@ services:
       retries: 10
     restart: unless-stopped
 
-  api:
-    build:
-      context: ./apps/api
-      args:
-        INSTALL_DEV: 'true'
-    environment:
-      DATABASE_URL: postgresql+psycopg://reviewer:reviewer@db:5432/reviewer
-      # Declared here, next to the proxy that makes it true. The API defaults
-      # this off so that running it without nginx never trusts client headers.
-      TRUST_PROXY_HEADERS: 'true'
-      # Salts stored IP hashes. The IPv4 space is small enough to brute-force,
-      # so an unsalted hash would make the privacy claim decorative.
-      IP_HASH_SALT: ${IP_HASH_SALT:-dev-only-change-me}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+  # Runs the migration once and exits. `docker compose up` blocks the API on it
+  # completing successfully, so a fresh clone needs no separate step and the API
+  # can never come up against a schema that was never migrated.
+  #
+  # A one-shot service rather than an entrypoint in the API container: an
+  # entrypoint runs once per replica and once per --reload restart, so several
+  # workers would race each other into the same `alembic upgrade`. This runs
+  # exactly once per `up`, and a failure is visible as a non-zero exit rather
+  # than a crash-looping API.
+  migrate:
+    <<: *api
+    command: ['alembic', 'upgrade', 'head']
+    # Compose would otherwise treat the clean exit as a crash and start it again.
+    restart: 'no'
     depends_on:
       db:
         condition: service_healthy
+
+  api:
+    <<: *api
+    environment:
+      <<: *api-env
+      # Also topology: true because nginx is in front and overwrites the header.
+      # The API defaults it off so anything running without a proxy never
+      # believes a client-supplied IP.
+      TRUST_PROXY_HEADERS: 'true'
+    ports:
+      # Published so the Vite dev server can proxy /api and /m straight to
+      # FastAPI. nginx is not in the dev path at all; it serves the built
+      # bundle in production only.
+      - '8000:8000'
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     # Source mount + reload: the API is the surface that changes most during
     # the build, and rebuilding an image per edit is the slowest possible loop.
-    volumes:
-      - ./apps/api:/srv
-      # Seed data is configuration, not application code, so it lives at the
-      # repo root and is mounted read-only rather than copied into the image.
-      - ./merchants:/srv/merchants:ro
     command: ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000', '--reload']
     healthcheck:
       test: ['CMD-SHELL', 'python -c "import urllib.request;urllib.request.urlopen(''http://127.0.0.1:8000/api/health'')"']
@@ -53,46 +100,24 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # nginx and the SPA are one service, because in production the SPA is not a
+  # process — it is a directory of files nginx reads. There is no Node runtime
+  # to keep alive and nothing for the two to talk to each other about.
+  #
+  # This is the production shape. Day-to-day frontend work does not use it:
+  # run `npm run dev` in apps/web and hit :5173, where Vite proxies /api and
+  # /m straight to the published API port.
   web:
     build:
-      context: ./apps/web
-      # Stop at `deps`: it has node_modules but no source, which arrives via
-      # the mount below. Building the production image for every edit would
-      # add a full `next build` to each change. Omit `target` to build the
-      # real production image.
-      target: deps
-    working_dir: /srv
-    command: ['npm', 'run', 'dev']
-    volumes:
-      - ./apps/web:/srv
-      # Named, not anonymous: compose re-attaches an existing anonymous volume
-      # even after a rebuild, so a newly added dependency would never appear in
-      # the container. Named means `docker volume rm smart_reviewer_web_modules`
-      # refreshes it without `down -v`, which would also destroy pgdata.
-      - web_modules:/srv/node_modules
-    environment:
-      # Server-side only. The browser never sees this: it reaches the API
-      # through nginx on the same origin, which is what keeps CORS out of the
-      # picture entirely.
-      INTERNAL_API_URL: http://api:8000
-    depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:1.27-alpine
+      # Repo root, so the image can take in both apps/web and nginx/nginx.conf.
+      context: .
+      dockerfile: apps/web/Dockerfile
     ports:
       - '8080:80'
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       api:
         condition: service_healthy
-      web:
-        condition: service_started
     restart: unless-stopped
 
 volumes:
   pgdata:
-  web_modules:

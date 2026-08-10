@@ -17,7 +17,8 @@ TEST_DATABASE_URL = os.environ.get(
     "postgresql+psycopg://reviewer:reviewer@db:5432/reviewer_test",
 )
 
-API_ROOT = Path(__file__).resolve().parents[1]
+# tests/integration/conftest.py -> apps/api
+API_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(scope="session")

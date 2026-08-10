@@ -14,9 +14,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, text
 
+from app.config import get_settings
 from app.services.suggestions import _CLAIM_GENERATION, _RELEASE_GENERATION
-from tests.conftest import TEST_DATABASE_URL
-from tests.test_suggestions import GOOD, StubProvider
+from tests.integration.conftest import TEST_DATABASE_URL
+from tests.integration.test_suggestions import GOOD, StubProvider
 
 CREATE = "/api/review/sessions"
 
@@ -67,7 +68,11 @@ def test_refund_does_not_reissue_a_used_generation_number():
             },
         ).scalar_one()
 
-    params = {"session_id": session_id, "cap": 5, "attempt_cap": 10}
+    params = {
+        "session_id": session_id,
+        "cap": get_settings().max_generations_per_session,
+        "attempt_cap": get_settings().max_generation_attempts_per_session,
+    }
 
     with engine.begin() as conn:
         first = conn.execute(_CLAIM_GENERATION, params).scalar()
@@ -116,7 +121,11 @@ def test_refund_applies_when_the_claim_is_still_the_newest():
             },
         ).scalar_one()
 
-    params = {"session_id": session_id, "cap": 5, "attempt_cap": 10}
+    params = {
+        "session_id": session_id,
+        "cap": get_settings().max_generations_per_session,
+        "attempt_cap": get_settings().max_generation_attempts_per_session,
+    }
 
     with engine.begin() as conn:
         claimed = conn.execute(_CLAIM_GENERATION, params).scalar()
@@ -145,18 +154,20 @@ def test_refund_applies_when_the_claim_is_still_the_newest():
 def test_failures_are_forgiven_but_not_unlimited(api, merchant, provider):
     """Without a monotonic ceiling, refunded failures make provider calls free
     and endlessly repeatable — one token would buy unlimited AI spend."""
+    ceiling = get_settings().max_generation_attempts_per_session
     provider.error = True
     token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
 
     statuses = [
-        api.post(f"{CREATE}/{token}/suggestions").status_code for _ in range(12)
+        api.post(f"{CREATE}/{token}/suggestions").status_code
+        for _ in range(ceiling + 2)
     ]
 
     assert statuses[0] == 502
     # Forgiveness runs out: once the attempt ceiling is reached the endpoint
     # stops calling the provider at all.
     assert statuses[-1] == 429
-    assert statuses.count(502) == 10
+    assert statuses.count(502) == ceiling
 
 
 def test_forgiveness_still_allows_recovery_after_a_transient_outage(
@@ -164,13 +175,19 @@ def test_forgiveness_still_allows_recovery_after_a_transient_outage(
 ):
     """The reason refunds exist at all: a customer whose first tries hit a
     broken provider must not lose their allowance."""
+    settings = get_settings()
+    cap = settings.max_generations_per_session
+    # Spend part of the never-refunded ceiling on failures, leaving enough for
+    # the full success allowance afterwards — which is the property under test.
+    wasted = settings.max_generation_attempts_per_session - cap
+
     provider.error = True
     token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
-    for _ in range(3):
+    for _ in range(wasted):
         assert api.post(f"{CREATE}/{token}/suggestions").status_code == 502
 
     provider.error = False
-    provider.responses = [json.dumps(GOOD) for _ in range(5)]
+    provider.responses = [json.dumps(GOOD) for _ in range(cap)]
 
-    for _ in range(5):
+    for _ in range(cap):
         assert api.post(f"{CREATE}/{token}/suggestions").status_code == 201

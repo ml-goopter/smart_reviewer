@@ -11,16 +11,16 @@ contradicted each other in several places.
 | R3 | Google handoff | Fire-and-forget `POST /complete`, `keepalive`, never awaited. **No `/google-redirect` endpoint.** Five endpoints total |
 | R4 | First suggestion batch | `GET /sessions/:token` **never generates**. The client calls `POST /suggestions` |
 | R5 | Session creation | ~~Server-side in Next.js~~ → **revised: FastAPI serves `/m/:merchantId` and redirects.** See Architecture revision |
-| R6 | Rate limiting | Atomic DB `generation_count < 5` per session; 60/hour per IP on create, counted in the database |
+| R6 | Rate limiting | Atomic DB check on `generation_count` per session; a per-IP hourly cap on create, both counted in the database. Limits live in `config.py` |
 | R7 | Completion | A milestone, not a gate. Validation reads `expires_at` and `disabled_at` only — never `status` |
 | R8 | Session TTL | 24 hours |
-| R9 | Handoff UX | Instruction screen with a deliberate second tap; absorbs the clipboard-failure state |
+| R9 | Handoff UX | ~~Instruction screen with a deliberate second tap~~ → **revised: instructions on the editor, Continue redirects directly.** See R9b |
 | R10 | AI provider | OpenAI SDK as transport; model via `OPENAI_MODEL`, endpoint via `OPENAI_BASE_URL` |
 | R11 | Bad batches | Store every suggestion that validates (1–3). Zero valid → one retry → 502 **and refund the cap slot** |
 | R12 | Topology | Monorepo, nginx reverse proxy, single origin, no CORS. **Frontend revised: Vite SPA, static build, no server** |
 | R13 | Onboarding | YAML seed files, idempotent upsert on `slug`, review URL derived from `google_place_id` |
 | R14 | Events | Six server-observable types only |
-| R15 | Testing | pytest integration tests against real Postgres + one Playwright E2E |
+| R15 | Testing | Two pytest layers — mocked unit tests, plus integration tests against real Postgres for what only Postgres verifies — and one Playwright E2E. See R15a |
 | R16 | Diversity | One topic per suggestion, rotating by generation; prior batches as an avoid-list |
 
 ## Corrections to the other documents
@@ -44,7 +44,11 @@ limiting is replaced by database counting, which stays correct across workers.
 does not exist; `googleReviewUrl` arrives with the session and `/complete` is
 fire-and-forget. §13 and §42's `token_hash` references are obsolete. §42's "never
 use merchantId from the browser after session creation" still holds. §44's event
-list is superseded.
+list is superseded. §28's "Opening Google…" screen and §29's clipboard-failure
+screen are both removed by R9b/R9c — Continue redirects directly and a failed
+copy is silent. §19's "replace the currently displayed suggestion batch" is
+reversed by R16a; batches accumulate. §22 and §25's `[ Reset ]` button is an
+icon inside the textarea in the accepted design.
 
 ## Event types
 
@@ -71,14 +75,25 @@ Google listing count before and after.
 
 ## Constants
 
-| Setting | Value | Env var |
+Values live in `apps/api/app/config.py` and nowhere else — this table used to
+restate them and drifted, which is the failure the settings module now has a
+test against. What is decided here is that each of these is a knob at all, and
+why; what it is set to is an operational choice, changed without amending a
+decision.
+
+| Setting | Env var | Why it exists |
 |---|---|---|
-| Session TTL | 24 hours | `SESSION_TTL_HOURS` |
-| Generations per session | 5 | `MAX_GENERATIONS_PER_SESSION` |
-| Session creates per IP per hour | 60 | `CREATE_RATE_LIMIT_PER_HOUR` |
-| Suggestions per batch | 3 | `SUGGESTIONS_PER_BATCH` |
-| Suggestion length | 20–500 chars | `SUGGESTION_MIN_CHARS` / `_MAX_CHARS` |
-| AI timeout | 20s | `AI_TIMEOUT_SECONDS` |
+| Session TTL | `SESSION_TTL_HOURS` | Covers scanning at the table and writing that evening |
+| Generations per session | `MAX_GENERATIONS_PER_SESSION` | Cost control; refundable, so it bounds successful batches only |
+| Generation attempts per session | `MAX_GENERATION_ATTEMPTS_PER_SESSION` | R6a's monotonic ceiling; must exceed the cap above |
+| Session creates per IP per hour | `CREATE_RATE_LIMIT_PER_HOUR` | Runaway-script guard, loose because of carrier-grade NAT |
+| Suggestions per batch | `SUGGESTIONS_PER_BATCH` | Up to this many; fewer may survive validation (R11) |
+| Suggestion length | `SUGGESTION_MIN_CHARS` / `_MAX_CHARS` | Too short is not a review, too long is unusable on a phone |
+| AI timeout | `AI_TIMEOUT_SECONDS` | Must stay below nginx's `proxy_read_timeout` |
+
+`.env.example` is generated from the same module. Only `DATABASE_URL` and
+`TRUST_PROXY_HEADERS` are set in `docker-compose.yml`, because those genuinely
+differ by environment rather than by decision.
 
 ## Known risks, accepted
 
@@ -119,6 +134,66 @@ normal for a request the contract calls optional and fires during navigation.
 usable is pointless if the edited text is gone: React state does not survive the
 navigation and `cache: no-store` disables bfcache. The draft is kept in
 tab-scoped `sessionStorage`, keyed by token. The token itself is never stored.
+
+**R16a — suggestions accumulate; a batch is never replaced.** `GET
+/sessions/:token` returns every suggestion in the session, ordered by
+generation then position, and the client appends each new batch rather than
+swapping it in. Replacing was a one-way door: a customer who liked the second
+card, pressed Generate More out of curiosity, and preferred the original had no
+route back to it, and on reaching the five-generation cap was left holding
+whichever batch happened to be last. Since every batch is already stored (R11)
+and rotates topics deliberately (R16), discarding them on screen threw away the
+diversity the rotation exists to produce.
+
+New cards land at the **bottom**, directly above the button that was just
+tapped. Prepending would place them off-screen above the customer's scroll
+position, which reads as nothing having happened.
+
+This reverses `frontend-spec.md` §19's "replace the currently displayed
+suggestion batch". The upper bound is 5 generations × 3 = 15 cards.
+
+**R15a — the suite is two layers, and the default is mocked.** R15 read as
+"integration tests against real Postgres", which made a database the price of
+running any test at all. Most of them did not need one: a route test asserting a
+status code and a header used Postgres only as somewhere to put a row, so a
+stopped container or another test's leftover data failed it for reasons that had
+nothing to do with the code.
+
+`tests/unit/` substitutes everything outward — `dependency_overrides` for the
+request-scoped `Session`, `monkeypatch.setattr` for the service a router calls —
+and runs with no containers. `tests/integration/` keeps a real Postgres and is
+deliberately small, holding only properties the database itself provides: the
+unique index on `token`, the CHECK constraints, the atomic conditional `UPDATE`
+behind the generation cap, R6b's refund race, and the seed's idempotent upsert
+on `slug`. Mocking those would assert that a stub does what it was told.
+
+The test to apply when adding one: if a failure would mean "the code is wrong",
+it is a unit test; if it would mean "the schema or the transaction is wrong", it
+is an integration test.
+
+**R9b — the instructions move to the editor and the handoff screen is removed.**
+R9 put "paste this into Google" on a screen *after* the tap, which is the moment
+the customer has already decided to leave and is least willing to read. The same
+sentences sit above the Continue button instead, where they are read before the
+decision, and **Continue to Google Reviews is a direct redirect** — one tap, on
+both the edited path and the skip path. The reviewer has two stages, not three.
+
+**R9c — a failed clipboard write is silent.** R9's handoff screen existed partly
+to absorb clipboard failure; with it gone there is nowhere to put a fallback, and
+one was deliberately not reinvented elsewhere. `navigator.clipboard` is absent on
+insecure origins and unreliable inside in-app browser WebViews, but neither is
+judged frequent enough to spend a screen and an extra tap on. The customer always
+reaches Google; on those origins they arrive without the text.
+
+Two consequences, both accepted:
+
+* `review_copied` is **optimistic**. `writeText` rejects asynchronously, so the
+  flag records that the API existed and was called, not that the text landed.
+  Awaiting the result to find out would reintroduce the delay before the redirect
+  that this decision removes.
+* HTTPS remains a functional requirement (risk 2 above), and now fails *quietly*
+  rather than visibly. A non-TLS deployment degrades to a plain link to Google
+  with no error anywhere the customer or the operator can see.
 
 **Operational fix — nginx no longer logs the request line.** Session tokens
 travel in the URL path, so `"$request"` wrote live capability keys into the

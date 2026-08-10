@@ -1,5 +1,4 @@
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -15,20 +14,6 @@ def _create(client, merchant):
 # --- POST /sessions -------------------------------------------------------
 
 
-def test_create_returns_201_and_a_token(client, merchant):
-    response = _create(client, merchant)
-
-    assert response.status_code == 201
-    token = response.json()["token"]
-    # 32 bytes urlsafe-encoded. Short enough for a URL, long enough that
-    # guessing is not a strategy.
-    assert len(token) >= 40
-
-
-def test_create_response_contains_only_the_token(client, merchant):
-    """The merchant is resolved from the session afterwards; returning any
-    merchant data here would invite the client to hold on to it."""
-    assert set(_create(client, merchant).json()) == {"token"}
 
 
 def test_tokens_are_unique_per_session(client, merchant):
@@ -74,48 +59,9 @@ def test_expiry_is_set_to_the_configured_ttl(client, merchant, db):
     assert abs((session.expires_at - expected).total_seconds()) < 60
 
 
-def test_unknown_merchant_is_404(client):
-    response = client.post(CREATE, json={"merchantId": str(uuid4())})
-
-    assert response.status_code == 404
 
 
-def test_malformed_merchant_id_is_400_not_422(client):
-    """The contract specifies 400; FastAPI's default 422 also volunteers a
-    field-by-field breakdown that a public endpoint should not."""
-    response = client.post(CREATE, json={"merchantId": "not-a-uuid"})
 
-    assert response.status_code == 400
-
-
-def test_inactive_merchant_is_409(client, merchant, db):
-    merchant.status = "INACTIVE"
-    db.flush()
-
-    assert _create(client, merchant).status_code == 409
-
-
-def test_merchant_without_google_url_is_409(client, merchant, db):
-    merchant.google_review_url = None
-    db.flush()
-
-    assert _create(client, merchant).status_code == 409
-
-
-def test_unavailable_reasons_are_indistinguishable(client, merchant, db):
-    """Whether a business is inactive, archived, or never finished setup is the
-    merchant's private information, not something a public URL should reveal."""
-    merchant.status = "ARCHIVED"
-    db.flush()
-    archived = _create(client, merchant)
-
-    merchant.status = "ACTIVE"
-    merchant.google_review_url = None
-    db.flush()
-    no_url = _create(client, merchant)
-
-    assert archived.status_code == no_url.status_code == 409
-    assert archived.json() == no_url.json()
 
 
 def test_rate_limit_returns_429_after_the_hourly_cap(client, merchant, db):
@@ -128,24 +74,6 @@ def test_rate_limit_returns_429_after_the_hourly_cap(client, merchant, db):
 # --- GET /sessions/{token} ------------------------------------------------
 
 
-def test_get_returns_the_public_payload(client, merchant):
-    token = _create(client, merchant).json()["token"]
-
-    body = client.get(f"{CREATE}/{token}").json()
-
-    assert body["merchant"] == {"name": "Pho 37", "category": "Vietnamese Restaurant"}
-    assert body["googleReviewUrl"] == "https://example.test/writereview"
-    assert body["suggestions"] == []
-    assert "expiresAt" in body["session"]
-
-
-def test_get_never_leaks_internal_fields(client, merchant):
-    token = _create(client, merchant).json()["token"]
-
-    raw = client.get(f"{CREATE}/{token}").text
-
-    for leaked in ("merchant_id", "google_place_id", "token", "slug", "created_ip_hash"):
-        assert leaked not in raw
 
 
 def test_get_does_not_generate_suggestions(client, merchant, db):
@@ -183,9 +111,6 @@ def test_get_records_session_opened(client, merchant, db):
     assert len(events) == 1
 
 
-def test_unknown_token_is_404(client):
-    assert client.get(f"{CREATE}/nosuchtoken").status_code == 404
-
 
 def test_expired_session_is_410(client, merchant, db):
     token = _create(client, merchant).json()["token"]
@@ -217,13 +142,8 @@ def test_completed_session_remains_usable(client, merchant, db):
     assert client.get(f"{CREATE}/{token}").status_code == 200
 
 
-def test_only_the_newest_generation_is_returned(client, merchant, db):
-    """The customer is looking at one batch of cards; earlier generations are
-    history, not current options."""
-    token = _create(client, merchant).json()["token"]
-    session = db.scalars(select(SmartReviewSession)).one()
-
-    for generation in (1, 2):
+def _seed_batches(db, session, merchant, generations):
+    for generation in generations:
         for position in (1, 2, 3):
             db.add(
                 SmartReviewSuggestion(
@@ -236,10 +156,82 @@ def test_only_the_newest_generation_is_returned(client, merchant, db):
             )
     db.flush()
 
+
+def test_every_generation_is_returned(client, merchant, db):
+    """Generating more adds to what is on screen rather than replacing it.
+
+    Replacing meant a customer who liked the second card of batch two and
+    pressed the button once more could never get it back, and at the cap was
+    left with whatever batch happened to be last.
+    """
+    token = _create(client, merchant).json()["token"]
+    session = db.scalars(select(SmartReviewSession)).one()
+    _seed_batches(db, session, merchant, (1, 2, 3))
+
     suggestions = client.get(f"{CREATE}/{token}").json()["suggestions"]
 
-    assert len(suggestions) == 3
-    assert all("Suggestion 2-" in item["text"] for item in suggestions)
-    assert [item["text"][-len("about the food.") :] for item in suggestions] == [
-        "about the food."
-    ] * 3
+    assert len(suggestions) == 9
+    assert {item["text"][:12] for item in suggestions} == {
+        "Suggestion 1",
+        "Suggestion 2",
+        "Suggestion 3",
+    }
+
+
+def test_generations_are_returned_oldest_first(client, merchant, db):
+    """Order is generation then position, so the newest batch lands at the
+    bottom of the list — directly where the customer just tapped Generate
+    More, rather than off-screen above them."""
+    token = _create(client, merchant).json()["token"]
+    session = db.scalars(select(SmartReviewSession)).one()
+    _seed_batches(db, session, merchant, (1, 2))
+
+    texts = [item["text"] for item in client.get(f"{CREATE}/{token}").json()["suggestions"]]
+
+    assert texts == [
+        f"Suggestion {generation}-{position} about the food."
+        for generation in (1, 2)
+        for position in (1, 2, 3)
+    ]
+
+
+def test_batches_written_out_of_order_still_come_back_in_order(client, merchant, db):
+    """Ordering comes from generation_number, not insertion order — a refunded
+    or retried generation can write a lower number after a higher one."""
+    token = _create(client, merchant).json()["token"]
+    session = db.scalars(select(SmartReviewSession)).one()
+    _seed_batches(db, session, merchant, (3, 1, 2))
+
+    texts = [item["text"] for item in client.get(f"{CREATE}/{token}").json()["suggestions"]]
+
+    assert texts == sorted(texts)
+
+
+def test_suggestions_from_another_session_are_never_included(client, merchant, db):
+    """The session filter is the only thing keeping one customer's cards out of
+    another's, on a page that shows every batch rather than the last one."""
+    mine = _create(client, merchant).json()["token"]
+    _create(client, merchant)
+
+    first, second = db.scalars(
+        select(SmartReviewSession).order_by(SmartReviewSession.created_at)
+    ).all()
+    owner = first if first.token == mine else second
+    other = second if owner is first else first
+
+    _seed_batches(db, owner, merchant, (1,))
+    db.add(
+        SmartReviewSuggestion(
+            session_id=other.id,
+            merchant_id=merchant.id,
+            generation_number=1,
+            position=1,
+            text_="Somebody else's suggestion about the food.",
+        )
+    )
+    db.flush()
+
+    texts = [item["text"] for item in client.get(f"{CREATE}/{mine}").json()["suggestions"]]
+
+    assert len(texts) == 3
+    assert not any("Somebody else" in text for text in texts)

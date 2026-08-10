@@ -8,56 +8,103 @@ the merchant's official Google review page with the text on their clipboard.
 ## Running locally
 
 ```bash
-cp .env.example .env                                        # add an OPENAI_API_KEY
-docker compose up -d
-docker compose exec api alembic upgrade head                # create the schema
+cp .env.example .env                                        # fill in the secrets
+docker compose up -d                                        # migrates, then starts
 docker compose exec api python -m app.seed merchants/*.yaml # load merchants
 open http://localhost:8080
 ```
 
-Nothing runs migrations automatically, so a fresh clone starts with an empty
-database until `alembic upgrade head` is run. The seed script is the only
-merchant onboarding path — there is no admin UI — and it prints each merchant's
-permanent `/m/:merchantId` URL, which is what goes into the QR code.
+**Migrations run themselves.** A one-shot `migrate` service runs
+`alembic upgrade head` and exits; the API waits on it completing successfully,
+so the schema is always current before anything serves a request and a fresh
+clone needs no separate step.
 
-Both commands are safe to re-run: migrations are versioned, and the seed upserts
-on `slug`. Editing a merchant means editing its YAML and running it again.
+It is a service rather than an entrypoint inside the API container on purpose:
+an entrypoint runs once per replica and again on every `--reload` restart, so
+several workers would race each other into the same upgrade. This runs exactly
+once per `up`, and a failed migration stops the API from starting at all rather
+than leaving it to crash-loop against a half-built schema.
+
+```bash
+docker compose logs migrate            # what it did
+docker compose run --rm migrate        # re-run on demand
+docker compose run --rm migrate alembic downgrade -1
+docker compose run --rm migrate alembic revision --autogenerate -m "..."
+```
+
+## Configuration
+
+`apps/api/app/config.py` is the only place a default is written. `.env.example`
+is generated from it, and a test fails if the committed file drifts:
+
+```bash
+docker compose run --rm api python -m app.config --example > .env.example
+```
+
+Copy it to `.env` and fill in the two secrets; everything else is commented out
+with its default shown, and uncommenting is how you override. `.env` is passed
+into the container whole, so every setting is tunable without touching code.
+
+`docker-compose.yml` sets only `DATABASE_URL` and `TRUST_PROXY_HEADERS` — the
+two values that differ by environment rather than by decision. A
+`${VAR:-default}` fallback there would be a second source for a value the
+settings module already owns, so a test rejects one.
+
+Seeding stays explicit — it is the only merchant onboarding path, there is no
+admin UI, and it prints each merchant's permanent `/m/:merchantId` URL, which is
+what goes into the QR code. It upserts on `slug`, so editing a merchant means
+editing its YAML and running it again.
 
 | Service | Purpose |
 |---|---|
-| `nginx` | Single public origin on `:8080`. `/api/*` → api, everything else → web |
-| `web` | Next.js. Dev mode with source mounted; hot reload works through nginx |
-| `api` | FastAPI. Source mounted, `--reload` |
+| `web` | nginx on `:8080`. Serves the built SPA; proxies `/api/*` and `/m/*` to the API |
+| `api` | FastAPI on `:8000`. Source mounted, `--reload` |
+| `migrate` | One-shot `alembic upgrade head`, then exits. The API waits on it |
 | `db` | Postgres 16, exposed on host `:5433` for psql |
 
+nginx and the SPA are one service because in production the SPA is not a
+process — it is a directory of files nginx reads. There is no Node runtime.
+
+## Frontend development
+
+The compose `web` service builds a production image, so it is the wrong loop for
+UI work. Run Vite on the host instead:
+
 ```bash
-docker compose exec api python -m pytest    # API tests
-docker compose exec web npx tsc --noEmit    # web typecheck
+cd apps/web && npm install
+npm run dev              # http://localhost:5173
+```
+
+Vite proxies `/api` and `/m` straight to the API's published port, so the whole
+flow — including scanning `/m/:merchantId` — works at `:5173` with nginx out of
+the picture. `vite.config.ts` and `nginx/nginx.conf` express the same routing
+split and must stay in step: a path served by one and not the other works in
+development and dead-ends in production.
+
+```bash
+cd apps/web
+npm run typecheck
+npm test
+```
+
+```bash
+docker compose exec api python -m pytest tests/unit   # no database needed
+docker compose exec api python -m pytest              # both layers
 docker compose exec db psql -U reviewer -d reviewer   # or psql -h localhost -p 5433
 ```
 
-End-to-end, against the running stack:
+The suite is split by whether the database is the subject or the scaffolding —
+`tests/unit/` mocks everything outward and runs with no containers,
+`tests/integration/` keeps a real Postgres for what only Postgres verifies. See
+`apps/api/tests/README.md`.
+
+Integration tests build their own scratch database by running the migration, so
+they cannot pass against a schema the migration does not actually produce.
+
+After changing anything under `apps/web/`, rebuild the image to see it on
+`:8080` — the bundle is baked in, not mounted:
 
 ```bash
-cd apps/web && npm ci && npx playwright install chromium
-E2E_MERCHANT_ID=$(docker compose -f ../../docker-compose.yml exec -T db \
-  psql -U reviewer -d reviewer -tA -c "select id from merchants where slug='pho37';" | tr -d '\r') \
-  npx playwright test
-```
-
-The E2E suite stubs suggestion generation, so it costs nothing and is
-deterministic. It exists for the one thing API tests cannot reach: the clipboard
-write, which needs a real browser, a real user gesture, and a secure context.
-
-Tests build their own scratch database by running the migration, so they cannot
-pass against a schema the migration does not actually produce.
-
-After changing `apps/web/package.json`, refresh the dependency volume —
-compose reuses it across rebuilds, so a new package would otherwise never
-appear in the container:
-
-```bash
-docker compose down web && docker volume rm smart_reviewer_web_modules
 docker compose up -d --build web
 ```
 
@@ -80,8 +127,9 @@ The compose file listens on port 80 only. Production terminates TLS at nginx.
 
 ```
 apps/api/     FastAPI · SQLAlchemy · Alembic · provider adapters
-apps/web/     Next.js · TypeScript · Tailwind v4
-nginx/        reverse proxy config
+apps/web/     Vite · React · TypeScript · plain CSS
+nginx/        reverse proxy + static serving config
+mockups/      accepted visual direction, screen by screen
 merchants/    per-merchant YAML, loaded by the seed script
 MVP-SPEC/     requirements — DECISIONS.md is authoritative
 ```
@@ -94,17 +142,16 @@ were resolved deliberately, not by accident.
 ## Flow
 
 ```
-QR → /m/:merchantId ──server-side──▶ POST /api/review/sessions
+QR → /m/:merchantId ──FastAPI──▶ creates the session
                                        │
-                              307 → /r/:token
+                              302 → /r/:token
                                        │
-     GET /api/review/sessions/:token ──┤  merchant name in first paint,
-                                       │  never generates
-     POST .../suggestions ─────────────┤  batch 1, then Generate More (max 5)
+     GET /api/review/sessions/:token ──┤  merchant name as soon as it lands;
+                                       │  never generates (R4)
+     POST .../suggestions ─────────────┤  batch 1, then Generate More (capped)
      POST .../select ──────────────────┤  records the choice, copies nothing
                                        │
-     copy on click → instruction screen → POST .../complete (keepalive,
-                                          not awaited) → Google
+     copy on click → POST .../complete (keepalive, not awaited) → Google
 ```
 
 ## AI provider
