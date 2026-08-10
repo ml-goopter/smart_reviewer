@@ -40,12 +40,13 @@ services:
       POSTGRES_USER: reviewer
       POSTGRES_PASSWORD: reviewer
       POSTGRES_DB: reviewer
-    ports:
-      # Exposed so Alembic and psql can run from the host without exec'ing
-      # into a container.
-      - '5433:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # 5433 on the host, not 5432: a developer machine usually already has a
+    # Postgres on the default port, and config.py's DATABASE_URL default names
+    # this one so the API and the tests run outside Docker too.
+    ports:
+      - '5433:5432'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U reviewer -d reviewer']
       interval: 5s
@@ -79,16 +80,23 @@ services:
       # The API defaults it off so anything running without a proxy never
       # believes a client-supplied IP.
       TRUST_PROXY_HEADERS: 'true'
-    ports:
-      # Published so the Vite dev server can proxy /api and /m straight to
-      # FastAPI. nginx is not in the dev path at all; it serves the built
-      # bundle in production only.
-      - '8000:8000'
+      # No value: a bare key forwards the host's variable into the container and
+      # sets nothing when it is unset. This is what makes the documented
+      # `LEAD_PROVIDER=fake docker compose up -d api` reach the API — a shell
+      # prefix otherwise only feeds Compose's own `${VAR}` interpolation. Never
+      # give it a default here; config.py owns that.
+      LEAD_PROVIDER:
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # Published so `npm run dev` on the host can proxy straight to FastAPI with
+    # nginx out of the picture. It also means /api/* is reachable without the
+    # proxy — an accepted risk while the crawler endpoints are open (spec
+    # §2.1.12), not an oversight.
+    ports:
+      - '8000:8000'
     # Source mount + reload: the API is the surface that changes most during
     # the build, and rebuilding an image per edit is the slowest possible loop.
     command: ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000', '--reload']
@@ -107,17 +115,20 @@ services:
   # This is the production shape. Day-to-day frontend work does not use it:
   # run `npm run dev` in apps/web and hit :5173, where Vite proxies /api and
   # /m straight to the published API port.
-  web:
+  web-nginx:
     build:
       # Repo root, so the image can take in both apps/web and nginx/nginx.conf.
       context: .
       dockerfile: apps/web/Dockerfile
     ports:
       - '8080:80'
+    # volumes:
+      # - ~/goopter.com:/etc/letsencrypt/live/goopter.com:ro
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
+    
 
 volumes:
   pgdata:
