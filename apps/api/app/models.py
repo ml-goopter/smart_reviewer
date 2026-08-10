@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -8,6 +9,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     SmallInteger,
     String,
     Text,
@@ -22,6 +24,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 # enums: adding a value to a PG enum needs its own migration and cannot be done
 # inside a transaction on older versions, whereas a CHECK is a one-line ALTER.
 MERCHANT_STATUSES = ("ACTIVE", "INACTIVE", "ARCHIVED")
+
+# How the row got here, not how good its data is. Seeding is the only path that
+# predates the lead crawler, so 'YAML' is the default and every existing row is
+# correctly labelled without a backfill.
+MERCHANT_SOURCES = ("YAML", "GOOGLE_PLACES")
 
 # No EXPIRED: expires_at is authoritative and evaluated on every read, and with
 # no background job nothing would ever write that row state. A session that has
@@ -82,6 +89,7 @@ class Merchant(Base):
     province_state: Mapped[str | None] = mapped_column(String(120))
     postal_code: Mapped[str | None] = mapped_column(String(20))
     country: Mapped[str | None] = mapped_column(String(120))
+    website: Mapped[str | None] = mapped_column(Text)
 
     google_place_id: Mapped[str | None] = mapped_column(String(255))
     google_profile_url: Mapped[str | None] = mapped_column(Text)
@@ -89,6 +97,13 @@ class Merchant(Base):
     # refuses to create a session without one. Keeping it nullable lets a
     # merchant be seeded before its Google listing has been linked.
     google_review_url: Mapped[str | None] = mapped_column(Text)
+
+    # A snapshot of what Google said at google_synced_at, never a live figure.
+    # Nothing refreshes these, so any display of them has to carry that date or
+    # it implies a currency the data does not have.
+    google_rating: Mapped[Decimal | None] = mapped_column(Numeric(2, 1))
+    google_review_count: Mapped[int | None] = mapped_column(Integer)
+    google_synced_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     # Server defaults, not just Python-side ones, so a psql fixup or any future
     # non-ORM insert path cannot produce a NOT NULL violation on a column the
@@ -100,6 +115,10 @@ class Merchant(Base):
     # Stable identifier for the seed script to upsert on. Not exposed publicly;
     # the QR code carries the uuid so merchant ids stay opaque.
     slug: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+
+    source: Mapped[str] = mapped_column(
+        String(30), nullable=False, server_default=text("'YAML'"), default="YAML"
+    )
 
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = mapped_column(
@@ -113,6 +132,9 @@ class Merchant(Base):
     __table_args__ = (
         CheckConstraint(
             _in_clause("status", MERCHANT_STATUSES), name="ck_merchants_status"
+        ),
+        CheckConstraint(
+            _in_clause("source", MERCHANT_SOURCES), name="ck_merchants_source"
         ),
         # Partial unique: many merchants may have no Google listing yet, and a
         # plain UNIQUE would let only one of them hold NULL in some engines.
