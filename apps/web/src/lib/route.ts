@@ -1,17 +1,35 @@
 /* Two static paths and one parameter.
  *
- * No router library: both routes are entered by a server-side 302 from
- * /m/:merchantId, and everything after that — suggestions, editor — is state at
- * a fixed URL. There is no in-app navigation for a router to manage.
+ * No router library. The customer-facing route is entered by a server-side 302
+ * from /m/:merchantId and stays at that URL for the life of the page; the
+ * internal crawler moves between /leads and /leads/:merchantId, which App.tsx
+ * pushes and reads back on popstate through this function. Two paths and one
+ * listener is less than a router costs.
  */
 
 export type Route =
   | { name: 'reviewer'; token: string }
+  /** The internal lead crawler. Not linked from any customer-facing screen;
+   *  reached by typing the URL. */
+  | { name: 'leads' }
+  | { name: 'leadEditor'; merchantId: string }
   /** `busy` is the per-IP creation limit, which clears on its own. Every other
    *  cause is permanent as far as the customer is concerned. */
   | { name: 'unavailable'; reason: 'link' | 'busy' }
 
+/** Merchant ids are UUIDs. Matching the shape rather than `.+` keeps a typo
+ *  like /leads/settings out of the editor, where it would render a form
+ *  against a 404. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export function routeFor(pathname: string, search = ''): Route {
+  if (pathname === '/leads' || pathname === '/leads/') return { name: 'leads' }
+
+  const lead = /^\/leads\/([^/]+)\/?$/.exec(pathname)
+  if (lead && UUID.test(lead[1]!)) {
+    return { name: 'leadEditor', merchantId: lead[1]! }
+  }
+
   // `location.pathname` is percent-encoded. Session tokens are
   // `secrets.token_urlsafe`, i.e. [A-Za-z0-9_-], so nothing normally needs
   // decoding — but a token that arrives encoded must still match the one the
