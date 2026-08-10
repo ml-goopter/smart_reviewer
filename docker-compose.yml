@@ -7,13 +7,31 @@ x-api: &api
     context: ./apps/api
     args:
       INSTALL_DEV: 'true'
+  # Everything a deployment may override comes from the repo-root .env, whole.
+  # Listing variables one by one meant a `${VAR:-default}` fallback beside every
+  # one, which is a second place the value was written — and the copies drifted.
+  # config.py holds the defaults; this file sets only what it cannot know.
+  env_file:
+    # Absent on a fresh clone, and the stack should still start: every setting
+    # except the two secrets has a working default.
+    - path: .env
+      required: false
   environment: &api-env
+    # Topology, not policy. The code defaults to the host-published port so it
+    # runs outside Docker; `db` resolves only inside the compose network.
     DATABASE_URL: postgresql+psycopg://reviewer:reviewer@db:5432/reviewer
+    # Where those two files land. Outside Docker the tests walk up instead.
+    REPO_ROOT: /repo
   volumes:
     - ./apps/api:/srv
     # Seed data is configuration, not application code, so it lives at the repo
     # root and is mounted read-only rather than copied into the image.
     - ./merchants:/srv/merchants:ro
+    # The two repo-level files the config tests read. Only apps/api is mounted,
+    # so without these the drift check would silently skip inside the container
+    # — which is where the documented `pytest` command runs it.
+    - ./.env.example:/repo/.env.example:ro
+    - ./docker-compose.yml:/repo/docker-compose.yml:ro
 
 services:
   db:
@@ -57,15 +75,10 @@ services:
     <<: *api
     environment:
       <<: *api-env
-      # Declared here, next to the proxy that makes it true. The API defaults
-      # this off so that running it without nginx never trusts client headers.
+      # Also topology: true because nginx is in front and overwrites the header.
+      # The API defaults it off so anything running without a proxy never
+      # believes a client-supplied IP.
       TRUST_PROXY_HEADERS: 'true'
-      # Salts stored IP hashes. The IPv4 space is small enough to brute-force,
-      # so an unsalted hash would make the privacy claim decorative.
-      IP_HASH_SALT: ${IP_HASH_SALT:-dev-only-change-me}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
     ports:
       # Published so the Vite dev server can proxy /api and /m straight to
       # FastAPI. nginx is not in the dev path at all; it serves the built

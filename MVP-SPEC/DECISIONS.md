@@ -11,7 +11,7 @@ contradicted each other in several places.
 | R3 | Google handoff | Fire-and-forget `POST /complete`, `keepalive`, never awaited. **No `/google-redirect` endpoint.** Five endpoints total |
 | R4 | First suggestion batch | `GET /sessions/:token` **never generates**. The client calls `POST /suggestions` |
 | R5 | Session creation | ~~Server-side in Next.js~~ → **revised: FastAPI serves `/m/:merchantId` and redirects.** See Architecture revision |
-| R6 | Rate limiting | Atomic DB `generation_count < 5` per session; 60/hour per IP on create, counted in the database |
+| R6 | Rate limiting | Atomic DB check on `generation_count` per session; a per-IP hourly cap on create, both counted in the database. Limits live in `config.py` |
 | R7 | Completion | A milestone, not a gate. Validation reads `expires_at` and `disabled_at` only — never `status` |
 | R8 | Session TTL | 24 hours |
 | R9 | Handoff UX | ~~Instruction screen with a deliberate second tap~~ → **revised: instructions on the editor, Continue redirects directly.** See R9b |
@@ -75,14 +75,25 @@ Google listing count before and after.
 
 ## Constants
 
-| Setting | Value | Env var |
+Values live in `apps/api/app/config.py` and nowhere else — this table used to
+restate them and drifted, which is the failure the settings module now has a
+test against. What is decided here is that each of these is a knob at all, and
+why; what it is set to is an operational choice, changed without amending a
+decision.
+
+| Setting | Env var | Why it exists |
 |---|---|---|
-| Session TTL | 24 hours | `SESSION_TTL_HOURS` |
-| Generations per session | 5 | `MAX_GENERATIONS_PER_SESSION` |
-| Session creates per IP per hour | 60 | `CREATE_RATE_LIMIT_PER_HOUR` |
-| Suggestions per batch | 3 | `SUGGESTIONS_PER_BATCH` |
-| Suggestion length | 20–500 chars | `SUGGESTION_MIN_CHARS` / `_MAX_CHARS` |
-| AI timeout | 20s | `AI_TIMEOUT_SECONDS` |
+| Session TTL | `SESSION_TTL_HOURS` | Covers scanning at the table and writing that evening |
+| Generations per session | `MAX_GENERATIONS_PER_SESSION` | Cost control; refundable, so it bounds successful batches only |
+| Generation attempts per session | `MAX_GENERATION_ATTEMPTS_PER_SESSION` | R6a's monotonic ceiling; must exceed the cap above |
+| Session creates per IP per hour | `CREATE_RATE_LIMIT_PER_HOUR` | Runaway-script guard, loose because of carrier-grade NAT |
+| Suggestions per batch | `SUGGESTIONS_PER_BATCH` | Up to this many; fewer may survive validation (R11) |
+| Suggestion length | `SUGGESTION_MIN_CHARS` / `_MAX_CHARS` | Too short is not a review, too long is unusable on a phone |
+| AI timeout | `AI_TIMEOUT_SECONDS` | Must stay below nginx's `proxy_read_timeout` |
+
+`.env.example` is generated from the same module. Only `DATABASE_URL` and
+`TRUST_PROXY_HEADERS` are set in `docker-compose.yml`, because those genuinely
+differ by environment rather than by decision.
 
 ## Known risks, accepted
 

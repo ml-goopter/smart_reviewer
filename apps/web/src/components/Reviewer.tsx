@@ -28,7 +28,7 @@ export function Reviewer({ token }: { token: string }) {
 
   const [announcement, setAnnouncement] = useState('')
 
-  /* Every generation costs money and one of five cap slots, so concurrency is
+  /* Every generation costs money and one of a few cap slots, so concurrency is
    * guarded by a ref set synchronously before the first await — state would be
    * a render behind, and both Strict Mode's double-invoked effect and an
    * impatient double-tap fire well inside that window. */

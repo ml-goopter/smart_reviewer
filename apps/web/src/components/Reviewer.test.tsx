@@ -104,7 +104,7 @@ describe('one generation, ever', () => {
     await screen.findByText(BATCH.suggestions[0]!.text)
 
     // The whole point: StrictMode double-invokes effects, and each generation
-    // costs money and one of five cap slots.
+    // costs money and one of a few cap slots.
     expect(countOf(calls, 'POST /api/review/sessions')).toBe(1)
   })
 

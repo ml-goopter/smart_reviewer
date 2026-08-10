@@ -8,7 +8,7 @@ the merchant's official Google review page with the text on their clipboard.
 ## Running locally
 
 ```bash
-cp .env.example .env                                        # add an OPENAI_API_KEY
+cp .env.example .env                                        # fill in the secrets
 docker compose up -d                                        # migrates, then starts
 docker compose exec api python -m app.seed merchants/*.yaml # load merchants
 open http://localhost:8080
@@ -31,6 +31,24 @@ docker compose run --rm migrate        # re-run on demand
 docker compose run --rm migrate alembic downgrade -1
 docker compose run --rm migrate alembic revision --autogenerate -m "..."
 ```
+
+## Configuration
+
+`apps/api/app/config.py` is the only place a default is written. `.env.example`
+is generated from it, and a test fails if the committed file drifts:
+
+```bash
+docker compose run --rm api python -m app.config --example > .env.example
+```
+
+Copy it to `.env` and fill in the two secrets; everything else is commented out
+with its default shown, and uncommenting is how you override. `.env` is passed
+into the container whole, so every setting is tunable without touching code.
+
+`docker-compose.yml` sets only `DATABASE_URL` and `TRUST_PROXY_HEADERS` — the
+two values that differ by environment rather than by decision. A
+`${VAR:-default}` fallback there would be a second source for a value the
+settings module already owns, so a test rejects one.
 
 Seeding stays explicit — it is the only merchant onboarding path, there is no
 admin UI, and it prints each merchant's permanent `/m/:merchantId` URL, which is
@@ -124,7 +142,7 @@ QR → /m/:merchantId ──FastAPI──▶ creates the session
                                        │
      GET /api/review/sessions/:token ──┤  merchant name as soon as it lands;
                                        │  never generates (R4)
-     POST .../suggestions ─────────────┤  batch 1, then Generate More (max 5)
+     POST .../suggestions ─────────────┤  batch 1, then Generate More (capped)
      POST .../select ──────────────────┤  records the choice, copies nothing
                                        │
      copy on click → POST .../complete (keepalive, not awaited) → Google
