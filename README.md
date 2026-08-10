@@ -50,10 +50,44 @@ two values that differ by environment rather than by decision. A
 `${VAR:-default}` fallback there would be a second source for a value the
 settings module already owns, so a test rejects one.
 
-Seeding stays explicit — it is the only merchant onboarding path, there is no
-admin UI, and it prints each merchant's permanent `/m/:merchantId` URL, which is
-what goes into the QR code. It upserts on `slug`, so editing a merchant means
-editing its YAML and running it again.
+Regenerating `.env.example` needs `docker compose restart api` afterwards: it is
+a single-file bind mount, and the running container keeps serving the old
+inode — so the drift test fails against a file you just fixed.
+
+Seeding is for demo merchants. It prints each merchant's permanent
+`/m/:merchantId` URL, which is what goes into the QR code, and upserts on
+`slug`, so editing a demo merchant means editing its YAML and running it again.
+Real merchants arrive through the lead crawler below.
+
+## Lead crawler
+
+An internal prospecting tool at **`/leads`**: search Google Places, save a
+merchant, copy its Smart Reviewer URL, then fill in what Google cannot supply.
+
+```bash
+LEAD_PROVIDER=fake docker compose up -d api   # no Google account needed
+open http://localhost:8080/leads
+```
+
+A saved lead is a row in the same `merchants` table, `ACTIVE`, with its review
+URL derived from the Place ID — so the URL it hands you works immediately.
+`merchant_review_context` is auto-filled from the listing's editorial summary
+and attributes and marked approved, which makes a fresh lead demo with
+grounding rather than with the generic fallback. What Places has no field for —
+products, menu items, keywords, custom instructions — is typed in the editor at
+`/leads/:merchantId`.
+
+**The crawler endpoints are unauthenticated**, deliberately, for the prototype.
+nginx proxies all of `/api/*` and the API is published on `:8000`, so anyone who
+can reach the host can search (spending your Google quota) and save. The ceiling
+is the per-day quota on the key, not the application — set one, restrict the key
+to Places and Geocoding, and add a billing alert. `MVP-SPEC/lead-crawler-spec.md`
+§2.1.12 records this as an accepted risk with what closing it later costs.
+
+Two Google filters do not exist: there is no rating *ceiling* and no review-count
+filter at all. Both run in our code after the fetch, which is why every result
+list states `N listings searched · M matched` — a strict review cap legitimately
+empties the list, and without the funnel that reads as a broken search.
 
 | Service | Purpose |
 |---|---|
@@ -68,7 +102,35 @@ process — it is a directory of files nginx reads. There is no Node runtime.
 ## Frontend development
 
 The compose `web` service builds a production image, so it is the wrong loop for
-UI work. Run Vite on the host instead:
+UI work. There are two dev loops; prefer the first.
+
+### In compose, behind the real nginx
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+open http://localhost:8080
+```
+
+`/` stops being a directory of built files and becomes the Vite dev server, so
+an edit under `apps/web/src` is live at `:8080` with no rebuild. **nginx stays
+in the path** and keeps routing `/api` and `/m` to FastAPI, so the topology is
+production's — a path that works here works in production, because the same
+nginx decided both. `nginx/nginx.dev.conf` routes `/api` and `/m` identically;
+`location /` proxies to Vite instead of serving files, and production's two
+static-cache locations (`/assets/`, `= /index.html`) have no counterpart because
+Vite serves those paths itself.
+
+The Vite container reuses the `build` stage of `apps/web/Dockerfile`, so its
+`node_modules` is installed for Linux. Do not mount the host's over it: a macOS
+`esbuild` binary inside a Linux container fails at startup. Changing
+`package.json` needs `--build`.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build vite
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down     # then plain `up -d` for production shape
+```
+
+### On the host
 
 ```bash
 cd apps/web && npm install
@@ -79,7 +141,8 @@ Vite proxies `/api` and `/m` straight to the API's published port, so the whole
 flow — including scanning `/m/:merchantId` — works at `:5173` with nginx out of
 the picture. `vite.config.ts` and `nginx/nginx.conf` express the same routing
 split and must stay in step: a path served by one and not the other works in
-development and dead-ends in production.
+development and dead-ends in production. The compose loop above avoids that
+class of mistake entirely, which is why it is the default recommendation.
 
 ```bash
 cd apps/web
@@ -140,6 +203,13 @@ others; they contradicted each other in several places and those contradictions
 were resolved deliberately, not by accident.
 
 ## Flow
+
+```
+/leads ──▶ POST /api/leads/search    ──▶ Places searchText (up to 3 pages)
+       ──▶ POST /api/leads/merchants ──▶ Place Details → merchant + context
+                                          │
+                                          ▼  https://{PUBLIC_BASE_URL}/m/{id}
+```
 
 ```
 QR → /m/:merchantId ──FastAPI──▶ creates the session
