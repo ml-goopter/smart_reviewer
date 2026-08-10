@@ -18,13 +18,24 @@ import sys
 import textwrap
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Values with no sensible default: they are per-deployment secrets, and shipping
 # one would mean a deployment that looks configured but is not. Emitted blank in
 # .env.example so an unset one is visible rather than inherited.
-SECRETS = frozenset({"openai_api_key", "ip_hash_salt"})
+SECRETS = frozenset({"openai_api_key", "ip_hash_salt", "google_api_key"})
+
+# The places adapters that exist. Anything else is refused at startup rather
+# than at the first request.
+LEAD_PROVIDERS = frozenset({"google", "fake"})
+
+# nginx proxies /api/* with proxy_read_timeout 60s. A search that runs longer
+# reaches the operator as nginx's own 504 HTML instead of the API's JSON error
+# envelope, so the worst-case search must fit inside this, which is itself well
+# under 60. Read twice: as the ceiling the settings below are validated against,
+# and as the wall-clock deadline app.services.leads.search stops paging on.
+LEAD_SEARCH_BUDGET_SECONDS = 45.0
 
 
 class Settings(BaseSettings):
@@ -159,6 +170,114 @@ class Settings(BaseSettings):
         500,
         description="Above this a suggestion is discarded as unusable on a phone.",
     )
+
+    # --- lead crawler ------------------------------------------------------
+
+    public_base_url: str = Field(
+        "http://localhost:8080",
+        description=(
+            "Origin the public reaches this deployment at. The merchant URL the "
+            "lead crawler hands over is built from this rather than from the "
+            "operator's browser origin, which is routinely a dev port — a link "
+            "copied from the Vite server would otherwise read as normal and be "
+            "dead everywhere else. Never stored; composed per response."
+        ),
+    )
+    lead_provider: str = Field(
+        "google",
+        description=(
+            "Which places provider the crawler talks to: 'google' or 'fake'. "
+            "The fake answers from a fixed set of Richmond and Vancouver "
+            "listings and needs no key, so the tool can be run and demonstrated "
+            "without a billing account. Unlike ai_provider this does select an "
+            "adapter — an unknown value is refused at startup."
+        ),
+    )
+    google_api_key: str = Field(
+        "",
+        description=(
+            "Credential for Places API (New) and the Geocoding API. Required to "
+            "search. Restrict it to those two APIs and set a per-day quota on "
+            "each: the crawler endpoints are unauthenticated in the MVP, so that "
+            "quota is the only ceiling on what a stranger can spend."
+        ),
+    )
+    lead_search_max_pages: int = Field(
+        3,
+        ge=1,
+        description=(
+            "Pages of Google results fetched per search, and the hard bound on "
+            "what one search bills. Google stops issuing page tokens after 60 "
+            "results, which is three pages at the default page size."
+        ),
+    )
+    lead_search_page_size: int = Field(
+        20,
+        ge=1,
+        le=20,
+        description=(
+            "Listings Google returns per page, up to its ceiling of 20. Billing "
+            "is per request, not per listing, so a smaller page buys fewer "
+            "listings for the same price; it is a way to shrink a demo, not to "
+            "save money. It never caps the search — that is "
+            "LEAD_SEARCH_MAX_RESULTS."
+        ),
+    )
+    lead_search_max_results: int = Field(
+        60,
+        ge=1,
+        description=(
+            "Post-filter matches that are enough: pagination stops once the "
+            "search holds this many and the response says `truncated`. Defaults "
+            "to Google's own ceiling of 60 results, so by default nothing is "
+            "cut short. Lowering it saves billed pages; the flag is what keeps "
+            "the shorter list from reading as everything Google had."
+        ),
+    )
+    lead_search_timeout_seconds: float = Field(
+        8.0,
+        gt=0,
+        description=(
+            "Budget for one Google call, split across httpx's connect, write, "
+            "read and pool phases so the phases sum to it rather than each "
+            "getting all of it. One search makes up to one geocode plus "
+            "LEAD_SEARCH_MAX_PAGES search requests, so its planned worst case "
+            "is (LEAD_SEARCH_MAX_PAGES + 1) x this: 32s at the defaults, and "
+            "startup refuses a combination whose product exceeds the budget "
+            "that keeps a search under nginx's 60s proxy_read_timeout. What "
+            "enforces that at run time is the deadline in "
+            "app.services.leads.search, which stops paging once the budget is "
+            "nearly spent: httpx phase timeouts cannot, because `read` bounds "
+            "the gap between chunks and not the length of a response, so a "
+            "single trickled response still outlives any of them."
+        ),
+    )
+
+    @field_validator("lead_provider")
+    @classmethod
+    def _known_lead_provider(cls, value: str) -> str:
+        # Unlike ai_provider this selects an adapter. A typo must stop the
+        # process: defaulting to Google would spend money the operator thought
+        # they were not spending, and answering every request with a 500 while
+        # the healthcheck stays green hides the fault entirely.
+        if value not in LEAD_PROVIDERS:
+            raise ValueError(f"must be one of {sorted(LEAD_PROVIDERS)}")
+        return value
+
+    @model_validator(mode="after")
+    def _search_fits_inside_the_proxy_timeout(self) -> "Settings":
+        # Refuses a combination that cannot fit even when every call behaves.
+        # Run-time enforcement is the deadline in app.services.leads.search;
+        # this only keeps the configured plan from blowing the budget on its
+        # own, which no deadline could rescue without abandoning every page.
+        worst_case = self.lead_search_timeout_seconds * (self.lead_search_max_pages + 1)
+        if worst_case > LEAD_SEARCH_BUDGET_SECONDS:
+            raise ValueError(
+                "LEAD_SEARCH_TIMEOUT_SECONDS x (LEAD_SEARCH_MAX_PAGES + 1) is "
+                f"{worst_case}s, above the {LEAD_SEARCH_BUDGET_SECONDS}s budget "
+                "that keeps a search inside nginx's proxy_read_timeout"
+            )
+        return self
 
 
 @lru_cache

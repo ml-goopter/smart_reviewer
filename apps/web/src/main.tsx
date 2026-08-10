@@ -6,9 +6,10 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { routeFor } from './lib/route'
 import './index.css'
 
-/* Route dispatch is a single read of the URL. Both routes are entered by a 302
- * from FastAPI's /m/:merchantId, and everything after that is state — so there
- * is no history to manage and no router to install. */
+/* Route dispatch at boot is a single read of the URL. The customer-facing route
+ * is entered by a 302 from FastAPI's /m/:merchantId and never changes after
+ * that; the internal crawler's two paths are managed by App.tsx with pushState
+ * and popstate, which is why no router is installed here. */
 const route = routeFor(window.location.pathname, window.location.search)
 
 const root = document.getElementById('root')

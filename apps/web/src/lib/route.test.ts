@@ -58,3 +58,39 @@ describe('the rate-limited redirect', () => {
     })
   })
 })
+
+describe('the lead crawler', () => {
+  const ID = '8e09301f-f928-43d5-9f60-d1287ab98f01'
+
+  it.each([['/leads'], ['/leads/']])('serves the crawler at %s', (pathname) => {
+    expect(routeFor(pathname)).toEqual({ name: 'leads' })
+  })
+
+  it.each([[`/leads/${ID}`], [`/leads/${ID}/`]])(
+    'opens the context editor at %s',
+    (pathname) => {
+      expect(routeFor(pathname)).toEqual({ name: 'leadEditor', merchantId: ID })
+    },
+  )
+
+  it('accepts an uppercase uuid', () => {
+    expect(routeFor(`/leads/${ID.toUpperCase()}`)).toEqual({
+      name: 'leadEditor',
+      merchantId: ID.toUpperCase(),
+    })
+  })
+
+  it.each([
+    ['/leads/settings'],
+    ['/leads/8e09301f'],
+    [`/leads/${ID}/context`],
+    ['/leadsfoo'],
+  ])('does not open an editor for %s', (pathname) => {
+    // Anything that is not a merchant id would render a form against a 404.
+    expect(routeFor(pathname)).toEqual({ name: 'unavailable', reason: 'link' })
+  })
+
+  it('leaves the reviewer route alone', () => {
+    expect(routeFor('/r/leads')).toEqual({ name: 'reviewer', token: 'leads' })
+  })
+})

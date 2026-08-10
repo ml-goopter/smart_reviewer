@@ -18,13 +18,16 @@ dependencies = [
     "pydantic-settings>=2.7,<3",
     "openai>=2.0,<3",
     "pyyaml>=6.0,<7",
+    # Reaches Google Places and Geocoding. Already present transitively via
+    # openai, but a transitive dependency is not a promise: this one is called
+    # directly, so it carries its own bound.
+    "httpx>=0.28,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3,<10",
     "pytest-asyncio>=0.25,<2",
-    "httpx>=0.28,<1",
     "time-machine>=2.16,<3",
 ]
 

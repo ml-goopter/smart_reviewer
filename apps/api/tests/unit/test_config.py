@@ -7,11 +7,18 @@ about IP_HASH_SALT for as long as they existed, because nothing checked.
 """
 
 import os
+import re
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from app.config import SECRETS, Settings, env_example
+from app.config import (
+    LEAD_SEARCH_BUDGET_SECONDS,
+    SECRETS,
+    Settings,
+    env_example,
+)
 
 
 def _repo_root() -> Path | None:
@@ -91,6 +98,77 @@ def test_compose_does_not_restate_a_default():
     ]
 
     assert offenders == []
+
+
+def test_an_unknown_lead_provider_stops_the_process(monkeypatch):
+    """It selects an adapter, so a typo cannot be defaulted away. Refused at
+    startup rather than per request: a container whose healthcheck stays green
+    while every /api/leads call 500s reports itself as working."""
+    monkeypatch.setenv("LEAD_PROVIDER", "nonsense")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+@pytest.mark.parametrize("name", ["google", "fake"])
+def test_the_adapters_that_exist_are_accepted(monkeypatch, name):
+    monkeypatch.setenv("LEAD_PROVIDER", name)
+
+    assert Settings().lead_provider == name
+
+
+@requires_repo
+def test_the_search_budget_stays_under_the_proxy_that_actually_fronts_it():
+    """The budget is only meaningful against nginx's real proxy_read_timeout;
+    over it the operator gets nginx's 504 HTML instead of the API's JSON error
+    envelope.
+
+    Every `proxy_read_timeout` in `nginx/` has to clear the budget, because this
+    reads the files rather than parsing their blocks. A location that genuinely
+    wants a shorter one has to be excluded here deliberately — the alternative
+    is a guard that skips itself the day the directory is renamed."""
+    conf_dir = REPO_ROOT / "nginx"
+    confs = sorted(conf_dir.glob("*.conf"))
+
+    assert confs, f"no nginx config in {conf_dir}: the budget is unchecked"
+
+    timeouts = [
+        int(match.group(1))
+        for conf in confs
+        for match in re.finditer(r"proxy_read_timeout\s+(\d+)s", conf.read_text())
+    ]
+
+    assert timeouts, "no proxy_read_timeout found to check the budget against"
+    assert LEAD_SEARCH_BUDGET_SECONDS < min(timeouts)
+
+
+def test_a_timeout_that_blows_the_budget_is_refused(monkeypatch):
+    monkeypatch.setenv("LEAD_SEARCH_TIMEOUT_SECONDS", "15")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        # A negative page count makes the budget product negative, which passes
+        # any ceiling: the guard has to be un-invertible, not merely present.
+        ("LEAD_SEARCH_MAX_PAGES", "-5"),
+        ("LEAD_SEARCH_MAX_PAGES", "0"),
+        ("LEAD_SEARCH_TIMEOUT_SECONDS", "0"),
+        # Above Google's ceiling every search is an INVALID_ARGUMENT, so the
+        # tool is a 502 generator until someone reads the logs.
+        ("LEAD_SEARCH_PAGE_SIZE", "50"),
+        ("LEAD_SEARCH_PAGE_SIZE", "0"),
+        ("LEAD_SEARCH_MAX_RESULTS", "0"),
+    ],
+)
+def test_nonsense_search_bounds_are_refused_at_startup(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError):
+        Settings()
 
 
 def test_the_attempt_ceiling_stays_above_the_success_cap():

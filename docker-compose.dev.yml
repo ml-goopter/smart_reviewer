@@ -1,0 +1,56 @@
+# Development overlay. Never used alone — it layers onto docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# What it changes: `/` stops being a directory of built files and becomes the
+# Vite dev server, so a source edit is visible on http://localhost:8080 without
+# a rebuild. Everything else — nginx, the API, the database, the routing — is
+# the production shape, which is the reason this exists rather than just
+# telling people to browse :5173. A path that works here works in production,
+# because the same nginx decided both.
+
+services:
+  # The toolchain stage of the image that normally builds the bundle. Reusing
+  # it means node_modules is already installed *for the container's platform*:
+  # mounting the host's node_modules instead would put a macOS esbuild binary
+  # inside a Linux container, which fails at startup with a message about the
+  # wrong architecture.
+  vite:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: build
+    command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', '5173']
+    environment:
+      # Reached over the compose network, not the published host port: nginx
+      # and Vite are both inside it, and `localhost` in here is this container.
+      VITE_API_TARGET: http://api:8000
+      # The browser talks to nginx on 8080, so that is where the HMR websocket
+      # has to go. Vite would otherwise derive it from its own port and the
+      # page would load but never live-update.
+      VITE_HMR_CLIENT_PORT: '8080'
+    volumes:
+      # Only the inputs, file by file. A whole-directory mount would shadow
+      # /srv/node_modules with the host's.
+      - ./apps/web/src:/srv/src:ro
+      - ./apps/web/index.html:/srv/index.html:ro
+      - ./apps/web/vite.config.ts:/srv/vite.config.ts:ro
+      - ./apps/web/tsconfig.json:/srv/tsconfig.json:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    # Same nginx image, different routing table. The bundle baked into it is
+    # still there and never served: every path that is not /api or /m now goes
+    # to Vite.
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      vite:
+        # Not service_healthy: Vite has no healthcheck, and nginx retries the
+        # upstream on its own once it is listening.
+        condition: service_started

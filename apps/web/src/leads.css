@@ -1,0 +1,322 @@
+/* Lead crawler — internal tool.
+ *
+ * Reuses the reviewer's tokens from index.css, but not its layout: the reviewer
+ * is a 480px column tuned for one thumb at a table, and this is a dense list
+ * someone scans on a laptop.
+ */
+
+.leads {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 28px 22px 60px;
+  font-family: var(--body);
+  color: var(--ink);
+}
+
+.lead-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 14px;
+  margin-bottom: 22px;
+}
+
+.lead-header h1 {
+  font-family: var(--display);
+  font-size: 22px;
+  margin: 0;
+}
+
+.lead-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.lead-tab {
+  font-family: var(--label);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--btn-radius);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.lead-tab--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.lead-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Wider than the search results table: the editor is prose in columns, and
+   line lengths past this stop being comfortable to read or to write. */
+.leads:has(.lead-editor) {
+  max-width: 1120px;
+}
+
+/* The editor is both the page frame and the column, so it needs the frame's
+   gutters and the column's rhythm at once. */
+.leads.lead-panel {
+  gap: 18px;
+}
+
+.lead-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  align-items: end;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+/* The editor is a document to write, not a row of filters to set: sections
+   with air between them, and the fields that hold lists side by side so the
+   page is scannable rather than eight boxes deep. */
+.lead-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.lead-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lead-section h3 {
+  font-family: var(--display);
+  font-size: 15.5px;
+  margin: 0;
+}
+
+.lead-caption {
+  margin: -8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 68ch;
+}
+
+.lead-grid {
+  display: grid;
+  /* Three across on a laptop, one on a phone, with no breakpoint to maintain.
+     280px is the width below which a one-per-line list stops being readable. */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.lead-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lead-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0 4px;
+  /* Fades rather than cuts, so a field scrolling underneath does not appear to
+     end abruptly at the bar. */
+  background: linear-gradient(to bottom, transparent, var(--bg) 34%);
+}
+
+/* The label typography sits on the container, so a wrapping `<label><span>`
+   (search form) and an explicit `<label for>` (editor) look identical. */
+.lead-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: var(--label);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Sentence case and the body face: this is prose to read, not a label to scan,
+   and uppercase monospace at 11px is unreadable at paragraph length. */
+.lead-hint {
+  font-family: var(--body);
+  font-size: 12.5px;
+  line-height: 1.45;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--muted);
+  max-width: 62ch;
+}
+
+.lead-field input,
+.lead-field select,
+.lead-field textarea {
+  font-family: var(--body);
+  font-size: 14.5px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 10px;
+  width: 100%;
+}
+
+.lead-field textarea {
+  resize: vertical;
+}
+
+.lead-btn {
+  font-family: var(--label);
+  font-size: 12.5px;
+  padding: 9px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--btn-radius);
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lead-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* .lead-panel is a stretch column, so a bare button spans its full width. */
+.lead-back {
+  align-self: flex-start;
+}
+
+.lead-btn--quiet {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.lead-heading {
+  font-family: var(--display);
+  font-size: 19px;
+  margin: 4px 0 0;
+}
+
+.lead-resolved,
+.lead-funnel,
+.lead-empty,
+.lead-note,
+.lead-url {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.lead-funnel {
+  font-family: var(--label);
+  letter-spacing: 0.02em;
+}
+
+.lead-warning {
+  margin: 0;
+  font-size: 13.5px;
+  color: #8a5a12;
+  background: #fdf4e3;
+  border: 1px solid #f0dfbd;
+  border-radius: 9px;
+  padding: 9px 12px;
+}
+
+.lead-error {
+  margin: 0;
+  font-size: 13.5px;
+  color: #8c2f2f;
+  background: #fdeeee;
+  border: 1px solid #f2cfcf;
+  border-radius: 9px;
+  padding: 9px 12px;
+}
+
+.lead-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 14px;
+}
+
+.lead-table th {
+  text-align: left;
+  font-family: var(--label);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+
+.lead-table td {
+  padding: 11px 12px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+  /* Merchant names and addresses come from Google and are unbounded. */
+  overflow-wrap: var(--wrap);
+}
+
+.lead-name {
+  display: block;
+  font-weight: 600;
+}
+
+.lead-sub {
+  display: block;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.lead-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.lead-badge {
+  font-family: var(--label);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.lead-url code {
+  font-family: var(--label);
+  font-size: 12.5px;
+  background: var(--surface-2);
+  padding: 3px 7px;
+  border-radius: 6px;
+  overflow-wrap: var(--wrap);
+}
