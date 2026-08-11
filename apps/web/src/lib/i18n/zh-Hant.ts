@@ -76,7 +76,7 @@ export const zhHant: Messages = {
   },
 
   notice: {
-    capReached: '繁體中文的建議已達次數上限。',
+    capReached: '建議已達次數上限。',
     capReachedEmpty: '這次無法為您準備建議。',
     failed: '目前無法產生新的建議。',
     retry: '再試一次',
