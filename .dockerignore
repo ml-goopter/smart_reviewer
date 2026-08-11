@@ -1,6 +1,0 @@
-node_modules
-dist
-.vite
-.git
-.env
-apps/api/.pytest_cache
