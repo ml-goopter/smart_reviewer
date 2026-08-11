@@ -9,10 +9,18 @@ the merchant's official Google review page with the text on their clipboard.
 
 ```bash
 cp .env.example .env                                        # fill in the secrets
+(cd apps/web && npm install && npm run build)               # dist/ is gitignored
 docker compose up -d                                        # migrates, then starts
 docker compose exec api python -m app.seed merchants/*.yaml # load merchants
 open http://localhost:8080
 ```
+
+**Build the frontend before the first `up`.** nginx serves `apps/web/dist` from
+a bind mount and `dist/` is gitignored, so on a fresh clone it does not exist —
+and Docker silently creates an empty directory for a missing bind source, which
+serves as 404s on every path rather than as an error. On Linux that directory is
+created `root:root`, so a later `npm run build` fails `EACCES` until it is
+removed with `sudo`. Order matters there; on macOS it is only 404s.
 
 **Migrations run themselves.** A one-shot `migrate` service runs
 `alembic upgrade head` and exits; the API waits on it completing successfully,
@@ -91,58 +99,61 @@ empties the list, and without the funnel that reads as a broken search.
 
 | Service | Purpose |
 |---|---|
-| `web` | nginx on `:8080`. Serves the built SPA; proxies `/api/*` and `/m/*` to the API |
+| `web` | Stock nginx on `:8080`. Serves `apps/web/dist` from a bind mount; proxies `/api/*` and `/m/*` to the API |
 | `api` | FastAPI on `:8000`. Source mounted, `--reload` |
 | `migrate` | One-shot `alembic upgrade head`, then exits. The API waits on it |
 | `db` | Postgres 16, exposed on host `:5433` for psql |
 
-nginx and the SPA are one service because in production the SPA is not a
-process — it is a directory of files nginx reads. There is no Node runtime.
+nginx and the SPA are one service because the SPA is not a process — it is a
+directory of files nginx reads. There is no Node runtime, and no image is built
+for the frontend: `web` is the stock `nginx:1.27-alpine` with `apps/web/dist`
+and `nginx/nginx.conf` mounted in. Deploying the frontend is therefore a build,
+not an image push.
 
 ## Frontend development
 
-The compose `web` service builds a production image, so it is the wrong loop for
-UI work. There are two dev loops; prefer the first.
-
-### In compose, behind the real nginx
+One loop, and it is the same shape that runs in production:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+cd apps/web && npm run build     # typechecks, then writes dist/
 open http://localhost:8080
 ```
 
-`/` stops being a directory of built files and becomes the Vite dev server, so
-an edit under `apps/web/src` is live at `:8080` with no rebuild. **nginx stays
-in the path** and keeps routing `/api` and `/m` to FastAPI, so the topology is
-production's — a path that works here works in production, because the same
-nginx decided both. `nginx/nginx.dev.conf` routes `/api` and `/m` identically;
-`location /` proxies to Vite instead of serving files, and production's two
-static-cache locations (`/assets/`, `= /index.html`) have no counterpart because
-Vite serves those paths itself.
+Rebuild and refresh. nginx picks up the new `dist/` on the next request — no
+restart, no `docker compose` command of any kind. Correspondingly there is no
+`--build` for `web`: it is a stock image, so `docker compose build web` prints
+`No services to build` and **exits 0**, which is a trap if you expect it to
+produce a bundle.
 
-The Vite container reuses the `build` stage of `apps/web/Dockerfile`, so its
-`node_modules` is installed for Linux. Do not mount the host's over it: a macOS
-`esbuild` binary inside a Linux container fails at startup. Changing
-`package.json` needs `--build`.
+There is deliberately no Vite dev server in compose: **the nginx that answers
+you is the nginx that answers in production**, so a route cannot work in
+development and dead-end after deploy. That matters more here than HMR, because
+the routing split is the part most likely to be got wrong — `/m/:merchantId`
+must reach FastAPI, `/r/:token` must reach the SPA, and one file decides which.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build vite
-docker compose -f docker-compose.yml -f docker-compose.dev.yml down     # then plain `up -d` for production shape
-```
+The cost is a build per change and no hot reload. Accepted deliberately.
 
-### On the host
+**`npm run build` is now the only thing that typechecks shipped code.** No image
+build runs `tsc` and there is no CI. It is `tsc --noEmit && vite build`, so a
+type error exits non-zero and `dist/` is left holding the *previous* bundle —
+which nginx keeps serving. Read the exit code: the symptom of a failed build is
+not an error page, it is your change appearing not to have happened.
+
+`npm run dev` on `:5173` still works for isolated component work:
 
 ```bash
 cd apps/web && npm install
 npm run dev              # http://localhost:5173
 ```
 
-Vite proxies `/api` and `/m` straight to the API's published port, so the whole
-flow — including scanning `/m/:merchantId` — works at `:5173` with nginx out of
-the picture. `vite.config.ts` and `nginx/nginx.conf` express the same routing
-split and must stay in step: a path served by one and not the other works in
-development and dead-ends in production. The compose loop above avoids that
-class of mistake entirely, which is why it is the default recommendation.
+Vite proxies `/api` and `/m` to the API's published port, so the full flow —
+including scanning `/m/:merchantId` — runs there too. But `vite.config.ts` is
+then the router, not nginx, and the two express the same split in different
+syntaxes with nothing checking that they agree. Add a route in one and forget
+the other and it works at `:5173` and 404s at `:8080`. Verify anything
+route-shaped at `:8080` before believing it.
+
+## Tests
 
 ```bash
 cd apps/web
@@ -164,12 +175,11 @@ The suite is split by whether the database is the subject or the scaffolding —
 Integration tests build their own scratch database by running the migration, so
 they cannot pass against a schema the migration does not actually produce.
 
-After changing anything under `apps/web/`, rebuild the image to see it on
-`:8080` — the bundle is baked in, not mounted:
-
-```bash
-docker compose up -d --build web
-```
+The unit suite includes guards that read repo-level files rather than code —
+`.env.example` drift, and every `proxy_read_timeout` in `nginx/`. Those files are
+bind-mounted into the API container at `/repo` precisely so the documented
+`docker compose exec api` command checks them; run the suite on the host and it
+walks up to the real tree instead.
 
 Never use `docker compose down -v`; it destroys `pgdata` along with it.
 
@@ -184,7 +194,11 @@ This bites first when testing the QR flow from a phone against
 Continue-to-Google fails in exactly the setting the product is built for. Use a
 TLS tunnel (`cloudflared`, `ngrok`, `tailscale serve`) for device testing.
 
-The compose file listens on port 80 only. Production terminates TLS at nginx.
+Compose ships plain HTTP: nginx listens on 80 and is published as `:8080`.
+Production terminates TLS at nginx itself — the `listen 443 ssl` and
+`ssl_certificate` lines are present but commented out in `nginx/nginx.conf`
+(:41, :47-48), along with the certificate mount in `docker-compose.yml`.
+Enabling it is uncommenting those three places, not new configuration.
 
 ## Layout
 
