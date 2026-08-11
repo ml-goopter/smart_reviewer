@@ -192,6 +192,13 @@ describe('the funnel', () => {
     await runValidSearch()
 
     expect(await screen.findByText(/Richmond, BC V6X 1T3, Canada/)).toBeTruthy()
+    // Written out rather than assembled from the catalogue: the sentence is
+    // split around the emphasised place so each language can put it where its
+    // own word order wants it, which leaves the spacing either side
+    // load-bearing and invisible to a test that reads the same two halves.
+    expect(document.querySelector('.lead-resolved')?.textContent).toBe(
+      'Searched around Richmond, BC V6X 1T3, Canada.',
+    )
   })
 
   it('explains an empty list rather than leaving it blank', async () => {
@@ -451,7 +458,7 @@ describe('saving', () => {
     expect(await screen.findByText(/was already saved/)).toBeTruthy()
   })
 
-  it('passes on the warning that an archived URL will not open', async () => {
+  it('warns in its own words that an archived URL will not open', async () => {
     await runValidSearch()
     await screen.findByText('Sushi Mura')
 
@@ -460,13 +467,18 @@ describe('saving', () => {
         ? reply(CATEGORIES)
         : reply({
             created: false,
-            note: 'archived — this URL will not open',
+            // Deliberately not the sentence the server really sends. The note
+            // is prose, and prose from the API cannot be translated — so what
+            // is shown is built here, from the status beside it. Echoing this
+            // back would put an English line under a Chinese header.
+            note: 'the server worded this itself',
             merchant: { ...SAVED_MERCHANT, status: 'ARCHIVED', url: null },
           }),
     )
     await click('Save')
 
     expect(await screen.findByText(/archived — this URL will not open/)).toBeTruthy()
+    expect(screen.queryByText(/the server worded this itself/)).toBeNull()
   })
 
   it('offers no URL for a merchant whose status has none', async () => {

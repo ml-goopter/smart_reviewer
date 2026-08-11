@@ -4,6 +4,7 @@ import type { ReactElement } from 'react'
 
 import { CATALOGS, LOCALE_NAMES, type Locale, type Messages } from '../../lib/i18n'
 import { LocaleProvider } from '../../lib/i18n/context'
+import { memoryStorage } from '../../lib/testing/memoryStorage'
 import { ContextEditor } from './ContextEditor'
 import { LeadCrawler } from './LeadCrawler'
 
@@ -26,6 +27,8 @@ const MERCHANT = {
   googleRating: 4.4,
   googleReviewCount: 128,
   googleSyncedAt: '2026-02-01T00:00:00Z',
+  createdAt: '2026-02-10T00:00:00Z',
+  city: 'Burnaby',
 }
 
 const CONTEXT = {
@@ -73,22 +76,42 @@ function reply(body: unknown, status = 200) {
   )
 }
 
-/** Routes by path. Every screen here fetches on mount; nothing asserts on a
- *  request, because the subject is only which words reach the screen. */
+/** Routes by path *and* method: the saved list and the save share one path, so
+ *  matching either alone hands one of them the other's body. Nothing here
+ *  asserts on a request — the subject is only which words reach the screen. */
 function route(path: string, method?: string) {
-  if (path.includes('/context')) return reply({ merchant: MERCHANT, context: CONTEXT })
+  if (path.includes('/context')) {
+    return contextFails
+      ? reply({ error: 'server_error' }, 500)
+      : reply({ merchant: MERCHANT, context: CONTEXT })
+  }
   if (path.includes('/categories')) {
     return reply({ categories: [{ value: 'restaurant', label: 'Restaurant' }] })
   }
-  if (path.includes('/search') || method === 'POST') return reply(SEARCH)
+  if (path.includes('/search')) return reply(SEARCH)
+  if (path.includes('/merchants') && method === 'POST') {
+    // An archived row: saved before, and its URL will not open.
+    return reply({
+      created: false,
+      merchant: { ...MERCHANT, status: 'ARCHIVED' },
+      note: 'archived — this URL will not open',
+    })
+  }
   return reply({ merchants: [MERCHANT] })
 }
 
 let failure: string | null = null
 
-/** The next search comes back as this API error code. */
+/** Every search from here on comes back as this API error code. */
 function failSearch(code: string) {
   failure = code
+}
+
+let contextFails = false
+
+/** The merchant fetch comes back 500. */
+function failContext() {
+  contextFails = true
 }
 
 /** A search needs a subject or the panel refuses it without calling the API,
@@ -102,6 +125,7 @@ function runSearch(search: Messages['leads']['search']) {
 
 beforeEach(() => {
   failure = null
+  contextFails = false
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
@@ -111,7 +135,11 @@ beforeEach(() => {
       return route(path, init?.method)
     }),
   )
-  vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: () => Promise.resolve() } })
+  vi.stubGlobal('navigator', { clipboard: { writeText: () => Promise.resolve() } })
+  // The drawer persists the language it is given, and jsdom keeps one storage
+  // for the whole file — a switch here would otherwise decide the next test's
+  // language.
+  vi.stubGlobal('localStorage', memoryStorage())
   sessionStorage.clear()
 })
 
@@ -205,8 +233,20 @@ describe.each(CHINESE)('%s', (locale) => {
     for (const text of [search.rating, search.reviews, search.distance]) {
       expect(screen.getByText(text)).toBeTruthy()
     }
-    // The funnel, the resolved location, and the row's own words.
+    // The funnel and the row's own words.
     expect(screen.getByText(search.funnel(60, 1))).toBeTruthy()
+    // The whole resolved sentence, not just the place inside it: the two
+    // halves carry load-bearing spacing that nothing else would catch.
+    // Read off the paragraph rather than matched as one node: the place sits
+    // in its own <strong>, which is the emphasis being asserted.
+    expect(document.querySelector('.lead-resolved')?.textContent).toBe(
+      `${search.resolvedBefore}${SEARCH.resolvedLocation.formatted}${search.resolvedAfter}`,
+    )
+    expect(document.querySelector('.lead-resolved strong')?.textContent).toBe(
+      SEARCH.resolvedLocation.formatted,
+    )
+    // The distance cell, which is under a translated heading.
+    expect(screen.getByText(search.metres(RESULT.distanceMeters))).toBeTruthy()
     expect(screen.getByText(new RegExp(search.uncategorised))).toBeTruthy()
     expect(screen.getByRole('link', { name: search.website })).toBeTruthy()
     expect(screen.getByRole('button', { name: search.save })).toBeTruthy()
@@ -264,6 +304,43 @@ describe.each(CHINESE)('%s', (locale) => {
     // A status is data. Translating it would make the screen disagree with the
     // database, and it is what the operator quotes when reporting a row.
     expect(screen.getByText(MERCHANT.status)).toBeTruthy()
+
+    // The date beside it follows the language on screen, not the machine's.
+    const day = new Date(MERCHANT.createdAt).toLocaleDateString(locale, {
+      day: '2-digit',
+      month: 'short',
+    })
+    expect(screen.getByText(day)).toBeTruthy()
+    expect(day).not.toBe(
+      new Date(MERCHANT.createdAt).toLocaleDateString('en', {
+        day: '2-digit',
+        month: 'short',
+      }),
+    )
+  })
+
+  it('words a dead URL itself rather than echoing the API', async () => {
+    inLocale(locale, <LeadCrawler onEdit={() => {}} />)
+
+    runSearch(leads.search)
+    await screen.findByRole('button', { name: leads.search.save })
+
+    fireEvent.click(screen.getByRole('button', { name: leads.search.save }))
+
+    // The server sends English prose for this. What is shown is built here,
+    // from the status it sent alongside.
+    await waitFor(() =>
+      expect(
+        screen.getByText(leads.search.willNotOpen(MERCHANT.name, 'ARCHIVED')),
+      ).toBeTruthy(),
+    )
+  })
+
+  it('translates a merchant that will not load', async () => {
+    failContext()
+    inLocale(locale, <ContextEditor merchantId={MERCHANT.id} onBack={() => {}} />)
+
+    await waitFor(() => expect(screen.getByText(leads.editor.loadFailed)).toBeTruthy())
   })
 
   it('translates the copy button and what it says afterwards', async () => {
