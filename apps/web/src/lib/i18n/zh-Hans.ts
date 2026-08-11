@@ -74,7 +74,7 @@ export const zhHans: Messages = {
   },
 
   notice: {
-    capReached: '简体中文的建议已达次数上限。',
+    capReached: '建议已达次数上限。',
     capReachedEmpty: '这次无法为您准备建议。',
     failed: '当前无法生成新的建议。',
     retry: '重试',

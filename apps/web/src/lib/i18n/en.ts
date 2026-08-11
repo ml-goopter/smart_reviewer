@@ -98,7 +98,7 @@ export const en = {
      *  generations to everyone who hit it. Every catalogue names its own
      *  language, so nothing is interpolated: the notice always renders in the
      *  locale whose cap was reached. */
-    capReached: "You've reached the limit for new English suggestions.",
+    capReached: "You've reached the limit for new suggestions.",
     /** The same cap reached having seen nothing — the attempts ceiling is
      *  never refunded, so this is reachable against a dead provider. */
     capReachedEmpty: "We couldn't prepare suggestions for you this time.",

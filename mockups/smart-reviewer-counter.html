@@ -83,6 +83,36 @@
   }
   .rv-app::-webkit-scrollbar{display:none}
 
+  .rv-topbar{display:flex; align-items:center; justify-content:space-between; gap:12px}
+  .rv-wordmark{font-family:var(--rv-label); font-size:13px; letter-spacing:.24em; text-transform:uppercase; color:var(--rv-ink)}
+  .rv-menu{width:34px; height:34px; margin-right:-5px; display:grid; place-items:center; background:none; border:none; cursor:pointer; color:var(--rv-ink); padding:0; transition:color .15s}
+  .rv-menu:hover{color:var(--rv-accent)}
+  .rv-menu:focus-visible{outline:2px solid var(--rv-accent); outline-offset:2px; border-radius:7px}
+  .rv-menu svg{width:22px; height:22px}
+
+  /* slide-in drawer (scoped to each phone) */
+  .rv-scrim{position:absolute; inset:0; background:rgba(12,24,18,.42); opacity:0; visibility:hidden; transition:opacity .25s ease; z-index:30}
+  .rv-scrim.open{opacity:1; visibility:visible}
+  .rv-drawer{position:absolute; top:0; right:0; height:100%; width:82%; max-width:300px; background:var(--rv-bg); border-left:1px solid var(--rv-border); transform:translateX(100%); transition:transform .28s cubic-bezier(.4,0,.2,1); z-index:31; display:flex; flex-direction:column; padding:0 18px 22px; box-shadow:-20px 0 44px -22px rgba(0,0,0,.4)}
+  .rv-drawer.open{transform:none}
+  @media (prefers-reduced-motion:reduce){ .rv-scrim,.rv-drawer{transition:none} }
+  .rv-drawer-hd{display:flex; align-items:center; justify-content:space-between; padding:36px 4px 10px}
+  .rv-drawer-title{font-family:var(--rv-label); font-size:13px; letter-spacing:.22em; text-transform:uppercase; color:var(--rv-ink)}
+  .rv-close{width:32px; height:32px; display:grid; place-items:center; background:none; border:none; cursor:pointer; color:var(--rv-muted); padding:0; transition:color .15s}
+  .rv-close:hover{color:var(--rv-accent)}
+  .rv-close:focus-visible{outline:2px solid var(--rv-accent); outline-offset:2px; border-radius:6px}
+  .rv-close svg{width:20px; height:20px}
+  .rv-drawer-label{font-family:var(--rv-label); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--rv-muted); margin:16px 6px 4px}
+  .rv-lang{display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; background:none; border:none; cursor:pointer; padding:12px 8px; border-radius:10px; font-family:var(--rv-body); font-size:16px; color:var(--rv-ink); text-align:left; transition:background .15s}
+  .rv-lang:hover{background:var(--rv-surface-2)}
+  .rv-lang:focus-visible{outline:2px solid var(--rv-accent); outline-offset:-2px}
+  .rv-lang[aria-checked="true"]{color:var(--rv-accent-strong); font-weight:600}
+  .rv-lang .rv-tick{width:17px; height:17px; color:var(--rv-accent); flex:none; visibility:hidden}
+  .rv-lang[aria-checked="true"] .rv-tick{visibility:visible}
+  .rv-drawer-foot{margin-top:auto; display:flex; flex-direction:column; gap:2px; padding-top:16px; border-top:1px solid var(--rv-border)}
+  .rv-drawer-link{background:none; border:none; cursor:pointer; text-align:left; padding:11px 8px; border-radius:9px; font-family:var(--rv-body); font-size:15px; color:var(--rv-muted); transition:color .15s, background .15s}
+  .rv-drawer-link:hover{color:var(--rv-ink); background:var(--rv-surface-2)}
+
   .rv-brand{font-family:var(--rv-label); font-size:12px; letter-spacing:.26em; text-transform:uppercase; color:var(--rv-muted); text-align:center}
   .rv-merchant{font-family:var(--rv-display); font-size:30px; line-height:1.05; letter-spacing:-.02em; text-align:center; margin:0; overflow-wrap:break-word; font-weight:680}
   .rv-cat{font-family:var(--rv-label); font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--rv-muted); text-align:center}
@@ -168,8 +198,13 @@
       <div class="cell-hd"><span class="cell-name">Suggestions</span><span class="cell-note">state: suggestions</span></div>
       <div class="phone"><div class="phone-inner"><div class="notch"></div>
         <div class="rv-app">
+          <div class="rv-topbar">
+            <span class="rv-wordmark">Goopter</span>
+            <button class="rv-menu" type="button" aria-label="Menu" aria-haspopup="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+            </button>
+          </div>
           <div class="rv-head">
-            <div class="rv-brand">Goopter</div>
             <h1 class="rv-merchant">Pho 37</h1>
             <div class="rv-cat">Vietnamese Restaurant</div>
           </div>
@@ -207,7 +242,12 @@
       <div class="cell-hd"><span class="cell-name">Editor</span><span class="cell-note">state: selected</span></div>
       <div class="phone"><div class="phone-inner"><div class="notch"></div>
         <div class="rv-app">
-          <div class="rv-head"><div class="rv-brand">Goopter</div></div>
+          <div class="rv-topbar">
+            <span class="rv-wordmark">Goopter</span>
+            <button class="rv-menu" type="button" aria-label="Menu" aria-haspopup="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+            </button>
+          </div>
           <hr class="rv-divider">
           <div class="rv-head">
             <h2 class="rv-q">Make it your own</h2>
@@ -264,5 +304,55 @@
     <span>plain-text AI · edit-in-place · Google handoff</span>
   </div>
 </div>
+
+<script>
+(function(){
+  var LANGS = ["English","Tiếng Việt","中文","Español","Français"];
+  var TICK = '<svg class="rv-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+  var X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+
+  function drawerHTML(){
+    var langs = LANGS.map(function(l,i){
+      return '<button class="rv-lang" role="menuitemradio" aria-checked="'+(i===0?'true':'false')+'"><span>'+l+'</span>'+TICK+'</button>';
+    }).join("");
+    return '<div class="rv-scrim"></div>'+
+      '<aside class="rv-drawer" role="menu" aria-label="Menu" aria-hidden="true">'+
+        '<div class="rv-drawer-hd"><span class="rv-drawer-title">Menu</span>'+
+          '<button class="rv-close" type="button" aria-label="Close menu">'+X+'</button></div>'+
+        '<div class="rv-drawer-label">Language</div>'+langs+
+        '<div class="rv-drawer-foot">'+
+          '<button class="rv-drawer-link">Help &amp; FAQ</button>'+
+          '<button class="rv-drawer-link">Privacy</button>'+
+        '</div>'+
+      '</aside>';
+  }
+
+  document.querySelectorAll(".rv-menu").forEach(function(menuBtn){
+    var phone = menuBtn.closest(".phone-inner");
+    if(!phone || phone.querySelector(".rv-drawer")) return;
+    phone.insertAdjacentHTML("beforeend", drawerHTML());
+
+    var scrim  = phone.querySelector(".rv-scrim");
+    var drawer = phone.querySelector(".rv-drawer");
+    var closeB = phone.querySelector(".rv-close");
+
+    function open(){ scrim.classList.add("open"); drawer.classList.add("open"); drawer.setAttribute("aria-hidden","false"); menuBtn.setAttribute("aria-expanded","true"); closeB.focus(); }
+    function close(){ scrim.classList.remove("open"); drawer.classList.remove("open"); drawer.setAttribute("aria-hidden","true"); menuBtn.setAttribute("aria-expanded","false"); }
+
+    menuBtn.setAttribute("aria-expanded","false");
+    menuBtn.addEventListener("click", open);
+    scrim.addEventListener("click", close);
+    closeB.addEventListener("click", close);
+    drawer.addEventListener("keydown", function(e){ if(e.key==="Escape") close(); });
+
+    drawer.querySelectorAll(".rv-lang").forEach(function(row){
+      row.addEventListener("click", function(){
+        drawer.querySelectorAll(".rv-lang").forEach(function(r){ r.setAttribute("aria-checked","false"); });
+        row.setAttribute("aria-checked","true");
+      });
+    });
+  });
+})();
+</script>
 </body>
 </html>
