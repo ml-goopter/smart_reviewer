@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { useMessages } from '../../lib/i18n/context'
+import type { Messages } from '../../lib/i18n'
 import { LeadFailure, fetchCategories, saveMerchant, search } from '../../lib/leadsApi'
 import {
   loadCriteria,
@@ -15,22 +17,19 @@ import type {
 } from '../../lib/leadTypes'
 import { CopyButton } from './CopyButton'
 
-const FAILURES: Record<string, string> = {
-  criteria_too_broad:
-    'Add a category or a text query — a location alone does not say what to look for.',
-  location_not_found: 'Google does not recognise that location. Check the spelling.',
-  unknown_category: 'That category is not one the server accepts.',
-  invalid_rating_range: 'The minimum rating is above the maximum.',
-  invalid_request: 'Some criteria are out of range.',
-  provider_unavailable: 'Google did not answer. Try again in a moment.',
-  network: 'Could not reach the API.',
-}
-
-function message(error: unknown): string {
+/** The API's `error` code to copy the operator can act on.
+ *
+ *  Indexed with a widened type because the code arrives from the server: one
+ *  this build has no entry for falls back to the status rather than to
+ *  `undefined` rendering as a blank error. */
+function message(failures: Messages['leads']['failures'], error: unknown): string {
   if (error instanceof LeadFailure) {
-    return FAILURES[error.code] ?? `Request failed (${error.status}).`
+    const known = (failures as Record<string, unknown>)[error.code]
+    // Typed rather than assumed: `status` in the same namespace is a function,
+    // and a server code colliding with it would otherwise render as source.
+    return typeof known === 'string' ? known : failures.status(error.status)
   }
-  return 'Something went wrong.'
+  return failures.unknown
 }
 
 function distance(metres: number | null): string {
@@ -92,6 +91,9 @@ const DEFAULT_CRITERIA: SearchCriteria = {
 }
 
 export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }) {
+  const leads = useMessages().leads
+  const t = leads.search
+
   const [categories, setCategories] = useState<LeadCategory[]>([])
   // Restored once, on mount. The panel unmounts whenever the operator switches
   // to Saved or opens an editor, and re-running the search to get back here
@@ -138,7 +140,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
     if (!hasSubject(criteria)) {
       // Nothing is sent: the same refusal the server would give, without the
       // round trip or the billed geocode behind it.
-      setError(FAILURES.criteria_too_broad!)
+      setError(leads.failures.criteria_too_broad)
       setResponse(null)
       return
     }
@@ -149,7 +151,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
       setResponse(await search(criteria))
     } catch (failure) {
       setResponse(null)
-      setError(message(failure))
+      setError(message(leads.failures, failure))
     } finally {
       setBusy(false)
     }
@@ -169,7 +171,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
           ? `${saved.merchant.name}: ${saved.note}`
           : saved.created
             ? null
-            : `${saved.merchant.name} was already saved — the existing row is unchanged.`,
+            : t.alreadySaved(saved.merchant.name),
       )
       // Patch just this row rather than re-running the search: a second search
       // is a second bill, and the operator's list would reorder underneath them.
@@ -192,7 +194,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
           },
       )
     } catch (failure) {
-      setError(message(failure))
+      setError(message(leads.failures, failure))
     } finally {
       setSaving((current) => current.filter((placeId) => placeId !== result.placeId))
     }
@@ -210,16 +212,16 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
         onChange={(event) => saveCriteria(criteriaFrom(event.currentTarget))}
       >
         <label className="lead-field">
-          <span>Location</span>
+          <span>{t.location}</span>
           <input
             name="location"
             defaultValue={initial.location}
             required
-            placeholder="Postal code, city or address"
+            placeholder={t.locationPlaceholder}
           />
         </label>
         <label className="lead-field">
-          <span>Radius (m)</span>
+          <span>{t.radius}</span>
           <input
             name="radiusMeters"
             type="number"
@@ -229,7 +231,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
           />
         </label>
         <label className="lead-field">
-          <span>Category</span>
+          <span>{t.category}</span>
           {/* Controlled, unlike its neighbours: the options arrive from the
               server after mount, and a `defaultValue` naming an option that
               does not exist yet is discarded — so a restored category silently
@@ -239,10 +241,14 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
             value={category}
             onChange={(event) => setCategory(event.target.value)}
           >
-            <option value="">Any</option>
-            {categories.map((category) => (
-              <option key={category.value} value={category.value}>
-                {category.label}
+            <option value="">{t.anyCategory}</option>
+            {categories.map((entry) => (
+              <option key={entry.value} value={entry.value}>
+                {/* Translated by the value, and the server's own label when
+                    this build has no entry for it — an option that renders
+                    blank would be worse than one in English. */}
+                {(leads.categories as Record<string, string | undefined>)[entry.value] ??
+                  entry.label}
               </option>
             ))}
           </select>
@@ -252,7 +258,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
             any differently, so splitting this would promise a distinction
             that does not exist. */}
         <label className="lead-field">
-          <span>Text query</span>
+          <span>{t.textQuery}</span>
           {/* Mirrors the API's own bound: without it an over-long paste comes
               back as "Some criteria are out of range", which names no
               criterion for the operator to act on. */}
@@ -260,11 +266,11 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
             name="textQuery"
             defaultValue={initial.textQuery ?? ''}
             maxLength={200}
-            placeholder="Sushi Mura omakase"
+            placeholder={t.textQueryPlaceholder}
           />
         </label>
         <label className="lead-field">
-          <span>Rating min</span>
+          <span>{t.ratingMin}</span>
           <input
             name="minRating"
             type="number"
@@ -275,7 +281,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
           />
         </label>
         <label className="lead-field">
-          <span>Rating max</span>
+          <span>{t.ratingMax}</span>
           <input
             name="maxRating"
             type="number"
@@ -286,7 +292,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
           />
         </label>
         <label className="lead-field">
-          <span>Max reviews</span>
+          <span>{t.maxReviews}</span>
           <input
             name="maxReviewCount"
             type="number"
@@ -297,16 +303,13 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
         </label>
 
         <button type="submit" className="lead-btn" disabled={busy}>
-          {busy ? 'Searching…' : 'Search'}
+          {busy ? t.submitting : t.submit}
         </button>
       </form>
 
       {/* Stated up front rather than only after a refusal: the requirement is
           not guessable from a form whose only required field is the location. */}
-      <p className="lead-note">
-        A category or a text query is required — the location says where to
-        look, not what for.
-      </p>
+      <p className="lead-note">{t.note}</p>
 
       {/* The live region is the container, not the message: a region that
           arrives in the same commit as its first text is usually not announced
@@ -322,27 +325,17 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
         {response !== null && (
           <>
             <p className="lead-resolved">
-              Searched around <strong>{response.resolvedLocation.formatted}</strong>
+              {t.resolved(response.resolvedLocation.formatted)}
             </p>
-            <p className="lead-funnel">
-              {response.searched} listings searched · {response.matched} matched
-            </p>
+            <p className="lead-funnel">{t.funnel(response.searched, response.matched)}</p>
             {response.partial && (
-              <p className="lead-warning">
-                Google returned an error partway through — these results are incomplete.
-              </p>
+              <p className="lead-warning">{t.partial}</p>
             )}
             {response.truncated && (
-              <p className="lead-warning">
-                Stopped at the result ceiling — Google had more. Narrow the search
-                or raise LEAD_SEARCH_MAX_RESULTS.
-              </p>
+              <p className="lead-warning">{t.truncated}</p>
             )}
             {response.results.length === 0 && (
-              <p className="lead-empty">
-                Nothing matched. The rating and review-count limits are applied after
-                Google returns its listings, so a tight cap can empty the list.
-              </p>
+              <p className="lead-empty">{t.empty}</p>
             )}
           </>
         )}
@@ -352,10 +345,10 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
         <table className="lead-table">
           <thead>
             <tr>
-              <th>Merchant</th>
-              <th>Rating</th>
-              <th>Reviews</th>
-              <th>Distance</th>
+              <th>{t.merchant}</th>
+              <th>{t.rating}</th>
+              <th>{t.reviews}</th>
+              <th>{t.distance}</th>
               <th />
             </tr>
           </thead>
@@ -365,7 +358,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
                 <td>
                   <span className="lead-name">{result.name}</span>
                   <span className="lead-sub">
-                    {result.category ?? 'Uncategorised'}
+                    {result.category ?? t.uncategorised}
                     {result.address === null ? '' : ` · ${result.address}`}
                   </span>
                   {/* The two things a prospector acts on. Google returns
@@ -377,7 +370,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
                       {result.phone !== null && result.website !== null && ' · '}
                       {result.website !== null && (
                         <a href={result.website} target="_blank" rel="noreferrer">
-                          Website
+                          {t.website}
                         </a>
                       )}
                     </span>
@@ -391,11 +384,13 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
                 <td className="lead-actions">
                   {result.saved ? (
                     <>
-                      <span className="lead-badge">Saved</span>
+                      <span className="lead-badge">{t.savedBadge}</span>
                       {result.url === null ? (
-                        <span className="lead-sub">{result.status} · no URL</span>
+                        <span className="lead-sub">
+                          {result.status} · {leads.noUrl}
+                        </span>
                       ) : (
-                        <CopyButton url={result.url} label="Copy URL" />
+                        <CopyButton url={result.url} label={leads.copyUrl} />
                       )}
                       {result.merchantId !== null && (
                         <button
@@ -403,7 +398,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
                           className="lead-btn lead-btn--quiet"
                           onClick={() => onEdit(result.merchantId!)}
                         >
-                          Edit
+                          {leads.edit}
                         </button>
                       )}
                     </>
@@ -414,7 +409,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
                       disabled={saving.includes(result.placeId)}
                       onClick={() => save(result)}
                     >
-                      {saving.includes(result.placeId) ? 'Saving…' : 'Save'}
+                      {saving.includes(result.placeId) ? t.saving : t.save}
                     </button>
                   )}
                 </td>
