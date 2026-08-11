@@ -525,7 +525,7 @@ function Suggestions({
 
       <div className="own">
         <span className="own__hint">{messages.suggestions.ownHint}</span>
-        <button className="link" onClick={onSkip}>
+        <button className="btn btn--line btn--white" onClick={onSkip}>
           {messages.suggestions.skip}
         </button>
       </div>

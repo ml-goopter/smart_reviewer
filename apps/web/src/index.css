@@ -261,6 +261,14 @@ body {
   padding: 12px 14px;
 }
 
+/* A filled .btn--line: same border, padding and hover, on the card surface
+ * rather than on the page. Worn by the route to Google under the list, which
+ * has to read as a real alternative to the suggestions rather than as a
+ * secondary action attached to Generate More directly above it. */
+.btn--white {
+  background: var(--surface);
+}
+
 .btn[disabled] {
   opacity: 0.55;
   cursor: default;

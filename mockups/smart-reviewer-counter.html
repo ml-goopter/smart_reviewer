@@ -131,6 +131,8 @@
   .rv-primary:hover{filter:brightness(1.05)}
   .rv-line{background:transparent; color:var(--rv-ink); border:1.5px solid var(--rv-border); padding:12px 14px}
   .rv-line:hover{border-color:var(--rv-accent); color:var(--rv-accent)}
+  /* a filled rv-line: the route to Google under the list */
+  .rv-white{background:var(--rv-surface)}
 
   .rv-own{display:flex; flex-direction:column; gap:10px; align-items:center; text-align:center}
   .rv-own .rv-hint{font-size:13.5px; color:var(--rv-muted)}
@@ -230,7 +232,7 @@
           <button class="rv-btn rv-line">Generate more suggestions</button>
           <div class="rv-own">
             <span class="rv-hint">Prefer to write your own?</span>
-            <button class="rv-link">Continue to Google →</button>
+            <button class="rv-btn rv-line rv-white">Write your own</button>
           </div>
           <p class="rv-auth">Only use wording that reflects your genuine experience. You can edit any suggestion before posting.</p>
         </div>

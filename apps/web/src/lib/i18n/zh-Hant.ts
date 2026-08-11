@@ -60,7 +60,7 @@ export const zhHant: Messages = {
     generating: '產生中…',
     generateMore: '產生更多建議',
     ownHint: '想自己寫嗎？',
-    skip: '前往 Google →',
+    skip: '自己撰寫',
     authenticity: '請僅使用符合您真實體驗的內容。發布前可以修改任何建議。',
   },
 

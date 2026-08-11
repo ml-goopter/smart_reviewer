@@ -439,7 +439,7 @@ describe('continue to Google', () => {
     await mount()
     await screen.findByText(BATCH.suggestions[0]!.text)
     await act(async () => {
-      screen.getByRole('button', { name: /continue to google →/i }).click()
+      screen.getByRole('button', { name: /write your own$/i }).click()
     })
 
     expect(writeText).not.toHaveBeenCalled()

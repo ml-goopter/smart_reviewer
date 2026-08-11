@@ -58,7 +58,7 @@ export const zhHans: Messages = {
     generating: '生成中…',
     generateMore: '生成更多建议',
     ownHint: '想自己写吗？',
-    skip: '前往 Google →',
+    skip: '自己撰写',
     authenticity: '请仅使用符合您真实体验的内容。发布前可以修改任何建议。',
   },
 
