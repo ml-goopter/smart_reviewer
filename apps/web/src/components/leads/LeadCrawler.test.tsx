@@ -794,6 +794,7 @@ describe('the context editor', () => {
     const hint = document.getElementById(field.getAttribute('aria-describedby')!)
     // A link here fails output validation for every suggestion this merchant
     // ever generates, so the hint has to say so before it is typed.
+    expect(hint!.textContent).toMatch(/do not/i)
     expect(hint!.textContent).toMatch(/links/)
     expect(hint!.textContent).toMatch(/validation/)
   })

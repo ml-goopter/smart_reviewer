@@ -1,8 +1,8 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
 
-import { CATALOGS, type Locale } from '../../lib/i18n'
+import { CATALOGS, LOCALE_NAMES, type Locale, type Messages } from '../../lib/i18n'
 import { LocaleProvider } from '../../lib/i18n/context'
 import { ContextEditor } from './ContextEditor'
 import { LeadCrawler } from './LeadCrawler'
@@ -39,6 +39,31 @@ const CONTEXT = {
   customInstructions: null,
 }
 
+const RESULT = {
+  placeId: 'place-1',
+  name: 'Sushi Mura',
+  address: '4231 No 3 Rd, Richmond',
+  category: null,
+  rating: 4.4,
+  reviewCount: 128,
+  distanceMeters: 900,
+  phone: '604-555-0100',
+  website: 'https://sushimura.example.test',
+  saved: false,
+  merchantId: null,
+  status: null,
+  url: null,
+}
+
+const SEARCH = {
+  resolvedLocation: { formatted: 'Richmond, BC', latitude: 49.1, longitude: -123.1 },
+  searched: 60,
+  matched: 1,
+  partial: false,
+  truncated: false,
+  results: [RESULT],
+}
+
 function reply(body: unknown, status = 200) {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -48,17 +73,46 @@ function reply(body: unknown, status = 200) {
   )
 }
 
+/** Routes by path. Every screen here fetches on mount; nothing asserts on a
+ *  request, because the subject is only which words reach the screen. */
+function route(path: string, method?: string) {
+  if (path.includes('/context')) return reply({ merchant: MERCHANT, context: CONTEXT })
+  if (path.includes('/categories')) {
+    return reply({ categories: [{ value: 'restaurant', label: 'Restaurant' }] })
+  }
+  if (path.includes('/search') || method === 'POST') return reply(SEARCH)
+  return reply({ merchants: [MERCHANT] })
+}
+
+let failure: string | null = null
+
+/** The next search comes back as this API error code. */
+function failSearch(code: string) {
+  failure = code
+}
+
+/** A search needs a subject or the panel refuses it without calling the API,
+ *  which would leave every assertion below testing the refusal instead. */
+function runSearch(search: Messages['leads']['search']) {
+  fireEvent.change(screen.getByLabelText(search.textQuery), {
+    target: { value: 'sushi' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: search.submit }))
+}
+
 beforeEach(() => {
-  // The panels fetch on mount. Nothing here asserts on a request; the subject
-  // is only which words reach the screen.
+  failure = null
   vi.stubGlobal(
     'fetch',
-    vi.fn((path: string) =>
-      path.includes('/context')
-        ? reply({ merchant: MERCHANT, context: CONTEXT })
-        : reply({ categories: [{ value: 'restaurant', label: 'Restaurant' }] }),
-    ),
+    vi.fn((path: string, init?: RequestInit) => {
+      if (failure !== null && init?.method === 'POST' && path.includes('/search')) {
+        return reply({ error: failure }, 400)
+      }
+      return route(path, init?.method)
+    }),
   )
+  vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: () => Promise.resolve() } })
+  sessionStorage.clear()
 })
 
 afterEach(() => {
@@ -140,14 +194,90 @@ describe.each(CHINESE)('%s', (locale) => {
     }
   })
 
-  it('leaves the merchant data in the language the merchant registered it in', async () => {
+  it('translates the results table and its actions', async () => {
+    inLocale(locale, <LeadCrawler onEdit={() => {}} />)
+
+    runSearch(leads.search)
+
+    const { search } = leads
+    await waitFor(() => expect(screen.getByText(search.merchant)).toBeTruthy())
+
+    for (const text of [search.rating, search.reviews, search.distance]) {
+      expect(screen.getByText(text)).toBeTruthy()
+    }
+    // The funnel, the resolved location, and the row's own words.
+    expect(screen.getByText(search.funnel(60, 1))).toBeTruthy()
+    expect(screen.getByText(new RegExp(search.uncategorised))).toBeTruthy()
+    expect(screen.getByRole('link', { name: search.website })).toBeTruthy()
+    expect(screen.getByRole('button', { name: search.save })).toBeTruthy()
+
+    // Data, not copy: translating a merchant's name or its address would make
+    // the screen disagree with Google.
+    expect(screen.getByText(RESULT.name)).toBeTruthy()
+  })
+
+  it('translates a failed search rather than leaving the API to word it', async () => {
+    inLocale(locale, <LeadCrawler onEdit={() => {}} />)
+
+    failSearch('location_not_found')
+    runSearch(leads.search)
+
+    await waitFor(() =>
+      expect(screen.getByText(leads.failures.location_not_found)).toBeTruthy(),
+    )
+  })
+
+  it('keeps a message in the language on screen when the language changes', async () => {
+    // The message is put on screen in one language and read in another. Held
+    // as a rendered sentence it would still be sitting there in the first.
+    inLocale(locale, <LeadCrawler onEdit={() => {}} />)
+
+    failSearch('location_not_found')
+    runSearch(leads.search)
+    await waitFor(() =>
+      expect(screen.getByText(leads.failures.location_not_found)).toBeTruthy(),
+    )
+
+    // Through the drawer, which is the only way it happens for real.
+    fireEvent.click(document.querySelector('.menu')!)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitemradio', { name: LOCALE_NAMES.en }))
+    })
+
+    expect(screen.getByText(CATALOGS.en.leads.failures.location_not_found)).toBeTruthy()
+    expect(screen.queryByText(leads.failures.location_not_found)).toBeNull()
+  })
+
+  it('translates the saved list', async () => {
+    inLocale(locale, <LeadCrawler onEdit={() => {}} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: leads.tabs.saved }))
+
+    const { saved } = leads
+    await waitFor(() => expect(screen.getByText(saved.merchant)).toBeTruthy())
+
+    expect(screen.getByText(saved.status)).toBeTruthy()
+    expect(screen.getByText(saved.savedOn)).toBeTruthy()
+    expect(screen.getByRole('button', { name: leads.edit })).toBeTruthy()
+    expect(screen.getByRole('button', { name: leads.copyUrl })).toBeTruthy()
+
+    // A status is data. Translating it would make the screen disagree with the
+    // database, and it is what the operator quotes when reporting a row.
+    expect(screen.getByText(MERCHANT.status)).toBeTruthy()
+  })
+
+  it('translates the copy button and what it says afterwards', async () => {
     inLocale(locale, <ContextEditor merchantId={MERCHANT.id} onBack={() => {}} />)
 
     await screen.findByText(MERCHANT.name)
 
-    // Name, slug and status are data, not copy. Translating a status would
-    // make the screen disagree with the database.
-    expect(screen.getByText(new RegExp(MERCHANT.slug))).toBeTruthy()
-    expect(screen.getByText(new RegExp(MERCHANT.status))).toBeTruthy()
+    // The editor's own copy button takes no label, so this is the catalogue's
+    // default rather than one passed in.
+    fireEvent.click(screen.getByRole('button', { name: leads.copy.copy }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: leads.copy.copied })).toBeTruthy(),
+    )
+    expect(screen.getByText(leads.copy.copiedAnnouncement)).toBeTruthy()
   })
 })
