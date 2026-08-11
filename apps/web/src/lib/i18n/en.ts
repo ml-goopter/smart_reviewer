@@ -71,7 +71,7 @@ export const en = {
     generating: 'Generating…',
     generateMore: 'Generate more suggestions',
     ownHint: 'Prefer to write your own?',
-    skip: 'Continue to Google →',
+    skip: 'Write your own',
     authenticity:
       'Only use wording that reflects your genuine experience. You can edit any suggestion before posting.',
   },

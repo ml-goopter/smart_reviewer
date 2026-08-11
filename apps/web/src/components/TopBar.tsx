@@ -39,17 +39,18 @@ function MenuButton({ expanded, onOpen }: { expanded: boolean; onOpen: () => voi
       aria-expanded={expanded}
       onClick={onOpen}
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        aria-hidden="true"
-      >
-        <line x1="3" y1="7" x2="21" y2="7" />
-        <line x1="3" y1="12" x2="21" y2="12" />
-        <line x1="3" y1="17" x2="21" y2="17" />
+      {/* 文 over A — the translate mark. The drawer behind it holds nothing
+        * but the language choice, and this names the choice on offer where
+        * three bars promised a menu that does not exist. Type rather than
+        * strokes, so both glyphs come from the app's own faces: sizing and
+        * the :lang(zh-Hant) swap live on .menu__han / .menu__latin. */}
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <text className="menu__han" x="7" y="12" textAnchor="middle">
+          文
+        </text>
+        <text className="menu__latin" x="17.5" y="22.5" textAnchor="middle">
+          A
+        </text>
       </svg>
     </button>
   )

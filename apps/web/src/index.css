@@ -261,6 +261,14 @@ body {
   padding: 12px 14px;
 }
 
+/* A filled .btn--line: same border, padding and hover, on the card surface
+ * rather than on the page. Worn by the route to Google under the list, which
+ * has to read as a real alternative to the suggestions rather than as a
+ * secondary action attached to Generate More directly above it. */
+.btn--white {
+  background: var(--surface);
+}
+
 .btn[disabled] {
   opacity: 0.55;
   cursor: default;
@@ -615,6 +623,23 @@ body {
 .menu svg {
   width: 22px;
   height: 22px;
+}
+
+/* The two glyphs of the translate mark. Lengths inside the svg are user units
+ * on a 24 viewBox, not device pixels — 13 here draws at 22 × 13/24 ≈ 12px.
+ *
+ * The CJK glyph takes --cjk like every other Chinese character in the app, so
+ * it is drawn in PingFang TC rather than SC once :lang(zh-Hant) matches. */
+.menu__han {
+  font-family: var(--cjk);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.menu__latin {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .scrim {

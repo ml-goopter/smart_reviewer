@@ -456,7 +456,7 @@ Example mobile UI:
 │                                │
 │ Prefer to write your own?      │
 │                                │
-│      Continue to Google →      │
+│      [ Write Your Own ]        │
 │                                │
 └────────────────────────────────┘
 ```
@@ -881,7 +881,7 @@ From the suggestions page:
 ```text id="gcs750"
 Prefer to write your own review?
 
-Continue to Google →
+[ Write Your Own ]
 ```
 
 Flow:
