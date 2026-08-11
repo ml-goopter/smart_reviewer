@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { useMessages } from '../../lib/i18n/context'
 import { copy } from '../../lib/leadsApi'
 
 /** Copies, then says so for a moment.
@@ -7,8 +8,13 @@ import { copy } from '../../lib/leadsApi'
  *  The URL is always rendered beside this button, so a clipboard that refuses
  *  — an insecure origin, an in-app WebView — costs a manual selection rather
  *  than the link itself. That is why a failure is stated rather than hidden.
+ *
+ *  `label` falls back to the catalogue's own word for Copy in the body rather
+ *  than as a default parameter, which cannot read a hook.
  */
-export function CopyButton({ url, label = 'Copy' }: { url: string; label?: string }) {
+export function CopyButton({ url, label }: { url: string; label?: string }) {
+  const t = useMessages().leads.copy
+
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   // Bumped on every click, so the countdown restarts even when the outcome is
   // the same value React would bail out on. Without it a second copy inherits
@@ -33,15 +39,15 @@ export function CopyButton({ url, label = 'Copy' }: { url: string; label?: strin
           setState(copied ? 'copied' : 'failed')
         }}
       >
-        {state === 'idle' ? label : state === 'copied' ? 'Copied' : 'Copy failed'}
+        {state === 'idle' ? (label ?? t.copy) : state === 'copied' ? t.copied : t.failed}
       </button>
       {/* The label changes on the control the operator just pressed, which a
           screen reader does not re-announce. The outcome is stated here. */}
       <span className="sr-only" role="status" aria-live="polite">
         {state === 'copied'
-          ? 'Copied to clipboard'
+          ? t.copiedAnnouncement
           : state === 'failed'
-            ? 'Copy failed — select the URL and copy it by hand'
+            ? t.failedAnnouncement
             : ''}
       </span>
     </>
