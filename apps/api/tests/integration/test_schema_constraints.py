@@ -59,12 +59,29 @@ def test_counters_default_without_the_orm(db):
         text(
             "INSERT INTO smart_review_sessions (merchant_id, token, expires_at) "
             "VALUES (:m, :t, now() + interval '24 hours') "
-            "RETURNING status, open_count, generation_count, suggestion_count"
+            "RETURNING status, open_count, suggestion_count"
         ),
         {"m": merchant.id, "t": uuid.uuid4().hex},
     ).one()
 
-    assert row == ("ACTIVE", 0, 0, 0)
+    assert row == ("ACTIVE", 0, 0)
+
+
+def test_the_language_generation_counter_defaults_without_the_orm(db):
+    """Same guarantee as above for the per-language counter, which the claim
+    statement inserts directly rather than through the ORM."""
+    merchant = _merchant(db)
+    session = _session(db, merchant)
+
+    row = db.execute(
+        text(
+            "INSERT INTO smart_review_session_languages (session_id, language) "
+            "VALUES (:i, 'en') RETURNING generation_count"
+        ),
+        {"i": session.id},
+    ).one()
+
+    assert row == (0,)
 
 
 def test_negative_generation_count_is_rejected(db):
@@ -74,9 +91,45 @@ def test_negative_generation_count_is_rejected(db):
 
     with pytest.raises(IntegrityError):
         db.execute(
-            text("UPDATE smart_review_sessions SET generation_count = -1 WHERE id = :i"),
+            text(
+                "INSERT INTO smart_review_session_languages "
+                "    (session_id, language, generation_count) "
+                "VALUES (:i, 'en', -1)"
+            ),
             {"i": session.id},
         )
+
+
+def test_an_unknown_suggestion_language_is_rejected(db):
+    """The language reaches the model prompt, so the database refuses anything
+    outside the served set even if the API layer is bypassed."""
+    merchant = _merchant(db)
+    session = _session(db, merchant)
+
+    with pytest.raises(IntegrityError):
+        _suggestion(db, session, merchant, language="klingon")
+
+
+def test_the_same_position_may_repeat_across_languages(db):
+    """generation_number restarts per language, so English batch 1 and Chinese
+    batch 1 both hold a position 1. The unique constraint carries the language
+    for exactly this reason."""
+    merchant = _merchant(db)
+    session = _session(db, merchant)
+
+    _suggestion(db, session, merchant, generation_number=1, position=1, language="en")
+    _suggestion(
+        db, session, merchant, generation_number=1, position=1, language="zh-Hant"
+    )
+
+    stored = db.execute(
+        text(
+            "SELECT count(*) FROM smart_review_suggestions WHERE session_id = :i"
+        ),
+        {"i": session.id},
+    ).scalar()
+
+    assert stored == 2
 
 
 def test_duplicate_token_is_rejected(db):

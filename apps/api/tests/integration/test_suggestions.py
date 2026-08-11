@@ -4,7 +4,12 @@ import pytest
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.models import SmartReviewEvent, SmartReviewSession, SmartReviewSuggestion
+from app.models import (
+    SmartReviewEvent,
+    SmartReviewSession,
+    SmartReviewSessionLanguage,
+    SmartReviewSuggestion,
+)
 from app.providers.base import ProviderError
 from app.routers.review import get_provider
 from app.services.suggestions import (
@@ -266,8 +271,12 @@ def test_total_failure_is_502_and_refunds_the_slot(api, merchant, db, provider):
     assert response.status_code == 502
 
     session = db.scalars(select(SmartReviewSession)).one()
-    db.refresh(session)
-    assert session.generation_count == 0
+    spent = db.scalars(
+        select(SmartReviewSessionLanguage.generation_count).where(
+            SmartReviewSessionLanguage.session_id == session.id
+        )
+    ).all()
+    assert spent == [0], "the slot went back to the language it came from"
 
     failures = db.scalars(
         select(SmartReviewEvent).where(
@@ -280,7 +289,7 @@ def test_total_failure_is_502_and_refunds_the_slot(api, merchant, db, provider):
 def test_generation_cap_returns_429_once_spent(api, merchant, provider):
     """Reads the configured cap. Hardcoding it meant changing the setting broke
     tests that were not testing the number."""
-    cap = get_settings().max_generations_per_session
+    cap = get_settings().max_generations_per_language
     provider.responses = [json.dumps(GOOD) for _ in range(cap + 1)]
     token = _token(api, merchant)
 

@@ -7,10 +7,16 @@ cannot leak by default.
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from app.models import DEFAULT_LANGUAGE, LANGUAGES
+
+# Built from the database vocabulary rather than written out again, so the two
+# cannot drift into a value the API accepts and a CHECK constraint rejects.
+Language = Literal[LANGUAGES]  # type: ignore[valid-type]
 
 # Bounds on the context an editor may store. The endpoint is unauthenticated by
 # decision, and every item lands verbatim in the AI prompt on every generation,
@@ -48,6 +54,22 @@ class PublicSession(BaseModel):
 class PublicSuggestion(BaseModel):
     id: UUID
     text: str
+    # Every language's suggestions are returned together and the browser shows
+    # only the ones matching the language on screen. Filtering server-side
+    # instead would make each switch a round-trip, and GET /sessions is a write
+    # — it marks the session opened — so three drawer taps would read as four
+    # visits.
+    language: str
+
+
+class GenerateSuggestionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Constrained to the languages we serve rather than taken as a free string:
+    # this value is interpolated into the model prompt, so an unvalidated one
+    # is an instruction channel to the provider. Optional, so a client that
+    # predates this field still works and gets English.
+    language: Language = DEFAULT_LANGUAGE
 
 
 class SessionResponse(BaseModel):

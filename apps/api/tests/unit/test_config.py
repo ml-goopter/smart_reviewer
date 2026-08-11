@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from app.models import LANGUAGES
 from app.config import (
     LEAD_SEARCH_BUDGET_SECONDS,
     SECRETS,
@@ -171,13 +172,14 @@ def test_nonsense_search_bounds_are_refused_at_startup(monkeypatch, name, value)
         Settings()
 
 
-def test_the_attempt_ceiling_stays_above_the_success_cap():
-    """The ceiling exists to bound failures, which refund their slot. At or
-    below the success cap it would instead stop customers from spending an
-    allowance they still have."""
+def test_the_attempt_ceiling_stays_above_every_languages_success_cap():
+    """The ceiling exists to bound failures, which refund their slot. It is
+    session-wide while the success cap is per language, so it has to clear the
+    total a customer can legitimately spend across every language — otherwise
+    it stops them from using an allowance they still have, in a language they
+    have not generated in yet."""
     settings = Settings()
 
-    assert (
-        settings.max_generation_attempts_per_session
-        > settings.max_generations_per_session
-    )
+    reachable = settings.max_generations_per_language * len(LANGUAGES)
+
+    assert settings.max_generation_attempts_per_session > reachable

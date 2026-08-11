@@ -35,6 +35,20 @@ MERCHANT_SOURCES = ("YAML", "GOOGLE_PLACES")
 # passed its expiry is simply one whose expires_at is in the past.
 SESSION_STATUSES = ("ACTIVE", "COMPLETED", "DISABLED")
 
+# The languages a suggestion may be written in, and the only values the API
+# accepts. BCP-47 tags, matching the locales the web app serves — they are
+# written into `document.documentElement.lang` there, which is what selects
+# Traditional or Simplified glyph forms for codepoints the two scripts share.
+#
+# Constrained in the database as well as at the edge because this value is
+# interpolated into the model prompt: an unconstrained one is an instruction
+# channel to the provider that never passes through a schema.
+LANGUAGES = ("en", "zh-Hant", "zh-Hans")
+
+# What a suggestion generated before this column existed was written in, and
+# what a request that names no language gets.
+DEFAULT_LANGUAGE = "en"
+
 # Only what the server actually witnesses. Editing happens in the browser and
 # stays there, so there is no SUGGESTION_EDITED; whether the review reached the
 # clipboard rides in SESSION_COMPLETED's metadata.
@@ -214,23 +228,24 @@ class SmartReviewSession(Base):
     open_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0"), default=0
     )
-    # The cost control. Incremented by an atomic conditional UPDATE so the cap
-    # holds across workers and instances without any shared cache. Callers must
-    # take the new value from that statement's RETURNING clause — the session
-    # is configured with expire_on_commit=False, so a previously loaded ORM
-    # instance keeps reporting the stale count.
-    generation_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0"), default=0
-    )
+    # The successful-batch cost control lives in smart_review_session_languages,
+    # one row per language, because the cap is per-language. There is
+    # deliberately no session-wide mirror of it: two counters for one quantity
+    # drift, and the total is the sum of those rows whenever it is wanted.
     suggestion_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0"), default=0
     )
 
-    # Never refunded, unlike generation_count. A failed generation gives the
-    # slot back so a provider outage does not burn a real customer's allowance
-    # — but without a second, monotonic counter that forgiveness makes failures
-    # free and infinitely repeatable, so anyone holding one token could drive
-    # unlimited paid provider calls. This is the hard ceiling on spend.
+    # Never refunded, unlike the per-language generation_count. A failed
+    # generation gives that slot back so a provider outage does not burn a real
+    # customer's allowance — but without a second, monotonic counter that
+    # forgiveness makes failures free and infinitely repeatable, so anyone
+    # holding one token could drive unlimited paid provider calls. This is the
+    # hard ceiling on spend.
+    #
+    # Session-wide, across every language, and deliberately so: splitting it
+    # per language would multiply what one leaked token can cost by the number
+    # of languages served.
     generation_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0"), default=0
     )
@@ -258,8 +273,7 @@ class SmartReviewSession(Base):
         # Turns a buggy decrement into an error instead of silently handing out
         # free generations past the cap.
         CheckConstraint(
-            "open_count >= 0 AND generation_count >= 0 AND suggestion_count >= 0 "
-            "AND generation_attempts >= 0",
+            "open_count >= 0 AND suggestion_count >= 0 AND generation_attempts >= 0",
             name="ck_sessions_counts_non_negative",
         ),
         # Composite FK, not a plain reference to suggestions.id: it makes the
@@ -299,9 +313,23 @@ class SmartReviewSuggestion(Base):
         UUID(as_uuid=True), ForeignKey("merchants.id"), nullable=False
     )
 
+    # Numbered within a language, not within the session: each language is a
+    # faithful copy of the single-language product, so its first batch covers
+    # the same strongest topics as any other language's first batch. Rotation
+    # is driven by this number — see topics_for_generation.
     generation_number: Mapped[int] = mapped_column(Integer, nullable=False)
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     text_: Mapped[str] = mapped_column("text", Text, nullable=False)
+
+    # Which language this suggestion is written in. The customer sees only the
+    # ones matching the language on screen; the rest stay in the session so
+    # switching back is free.
+    language: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default=text(f"'{DEFAULT_LANGUAGE}'"),
+        default=DEFAULT_LANGUAGE,
+    )
 
     # Which experience angle this suggestion was asked to cover. Never rendered.
     # It exists so selected_at becomes interpretable: knowing customers pick the
@@ -319,11 +347,20 @@ class SmartReviewSuggestion(Base):
     __table_args__ = (
         # Positions are renumbered 1..n when only some of a batch validates, so
         # a batch may be shorter than three — but never sparse or duplicated.
+        #
+        # Language is part of the key because generation_number restarts per
+        # language: English batch 1 and Traditional Chinese batch 1 both hold a
+        # position 1, and without this column the second one to be written
+        # would be rejected.
         UniqueConstraint(
             "session_id",
+            "language",
             "generation_number",
             "position",
             name="uq_suggestion_session_generation_position",
+        ),
+        CheckConstraint(
+            _in_clause("language", LANGUAGES), name="ck_suggestion_language"
         ),
         # Referenced by the sessions composite FK above. Redundant with the
         # primary key for uniqueness, but Postgres requires a unique constraint
@@ -338,6 +375,51 @@ class SmartReviewSuggestion(Base):
             "smart_review_suggestions_session_generation_idx",
             "session_id",
             "generation_number",
+        ),
+    )
+
+
+class SmartReviewSessionLanguage(Base):
+    """One row per language a session has generated in, holding that language's
+    share of the generation cap.
+
+    A table rather than columns on the session, because the cap is claimed by
+    an atomic conditional statement and that only works against a single row:
+    an upsert here locks exactly the (session, language) pair, so two requests
+    for the same language cannot both pass the cap while a request for another
+    language is not blocked behind either of them.
+
+    `generation_attempts` deliberately stays on the session and is not
+    mirrored here. It is the monotonic ceiling on provider spend for the whole
+    token, and splitting it per language would multiply what one leaked token
+    can cost by the number of languages served.
+    """
+
+    __tablename__ = "smart_review_session_languages"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("smart_review_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    language: Mapped[str] = mapped_column(String(20), primary_key=True)
+
+    # Refunded when a generation fails, exactly as the session-wide counter it
+    # replaced was. See _RELEASE_GENERATION.
+    generation_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), default=0
+    )
+
+    created_at: Mapped[datetime] = _created_at()
+
+    __table_args__ = (
+        CheckConstraint(
+            _in_clause("language", LANGUAGES), name="ck_session_languages_language"
+        ),
+        # Turns a buggy refund into an error rather than silently handing out
+        # generations past the cap.
+        CheckConstraint(
+            "generation_count >= 0", name="ck_session_languages_count_non_negative"
         ),
     )
 

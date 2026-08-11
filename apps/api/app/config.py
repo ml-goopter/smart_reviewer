@@ -89,7 +89,7 @@ class Settings(BaseSettings):
         ),
     )
     prompt_version: str = Field(
-        "v1",
+        "v2",
         description="Stamped on generated rows so a prompt change is traceable.",
     )
 
@@ -114,23 +114,30 @@ class Settings(BaseSettings):
             "that evening. Expiry is authoritative on every read."
         ),
     )
-    max_generations_per_session: int = Field(
+    max_generations_per_language: int = Field(
         3,
         description=(
-            "Successful suggestion batches per session. Enforced as an atomic "
-            "UPDATE on generation_count, so it holds across workers and "
-            "instances without shared state."
+            "Successful suggestion batches per language per session. Enforced "
+            "as an atomic conditional upsert on one "
+            "smart_review_session_languages row, so it holds across workers "
+            "and instances without shared state. Per language rather than per "
+            "session so that a customer switching to their own language gets "
+            "the same product an English reader gets, rather than whatever "
+            "allowance the previous language left behind."
         ),
     )
     max_generation_attempts_per_session: int = Field(
-        6,
+        30,
         description=(
-            "A monotonic ceiling on provider calls per session. Because a "
-            "failed generation refunds its slot, the cap above bounds only "
-            "successful batches — failures would otherwise be free and "
-            "endlessly repeatable, which is unbounded spend for anyone holding "
-            "a single token. Set above the success cap so ordinary transient "
-            "failures are still forgiven."
+            "A monotonic ceiling on provider calls for the whole session, "
+            "across every language. Because a failed generation refunds its "
+            "slot, the cap above bounds only successful batches — failures "
+            "would otherwise be free and endlessly repeatable, which is "
+            "unbounded spend for anyone holding a single token. Deliberately "
+            "not per language: that would multiply what one leaked token can "
+            "cost by the number of languages served. Set well above "
+            "languages x success cap so ordinary transient failures are still "
+            "forgiven."
         ),
     )
     create_rate_limit_per_hour: int = Field(

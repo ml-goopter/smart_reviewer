@@ -29,15 +29,18 @@ def test_returns_201_with_the_generated_batch(api):
     ]
 
 
-def test_a_suggestion_exposes_only_id_and_text(api):
+def test_a_suggestion_exposes_only_id_text_and_language(api):
     """The stored row also carries a topic, a prompt version, a model name and
     a generation number. None of it is the customer's business, and a response
-    model that named them would put the prompt strategy on a public endpoint."""
+    model that named them would put the prompt strategy on a public endpoint.
+
+    Language is the one addition: the browser is sent every language's
+    suggestions at once and needs it to show the right ones."""
     api.on_generate = [FakeSuggestion("The broth had real depth.")]
 
     item = api.post(SUGGEST, json={}).json()["suggestions"][0]
 
-    assert set(item) == {"id", "text"}
+    assert set(item) == {"id", "text", "language"}
 
 
 def test_a_short_batch_is_returned_as_is(api):
@@ -108,3 +111,49 @@ def test_a_failure_never_names_the_provider(api):
 
     for leaked in ("openai", "gemini", "api_key", "quota", "http"):
         assert leaked not in body.lower()
+
+
+def test_the_requested_language_reaches_the_service(api):
+    """The router's whole contribution to this feature is carrying the value
+    down. Nothing else on the request names a language."""
+    api.on_generate = [FakeSuggestion("湯頭很濃郁。", language="zh-Hant")]
+
+    api.post(SUGGEST, json={"language": "zh-Hant"})
+
+    _session, _provider, language = api.calls["generate"][-1]
+    assert language == "zh-Hant"
+
+
+def test_no_language_means_english(api):
+    """A body-less POST is still valid, and predates the field entirely."""
+    api.on_generate = [FakeSuggestion("The broth had real depth.")]
+
+    api.post(SUGGEST)
+
+    _session, _provider, language = api.calls["generate"][-1]
+    assert language == "en"
+
+
+@pytest.mark.parametrize("language", ["klingon", "zh", "", "en-US", "ZH-HANT"])
+def test_a_language_outside_the_served_set_is_refused(api, language):
+    """This value is interpolated into the model prompt, so anything not on the
+    list is refused at the edge rather than reaching the service. Near-misses
+    are included deliberately: `zh` and `en-US` are plausible tags a client
+    might send, and neither names a catalogue we have."""
+    response = api.post(SUGGEST, json={"language": language})
+
+    # 400 and a fixed code, not FastAPI's 422 field breakdown — the house
+    # contract for a malformed request, set in errors.py.
+    assert response.status_code == 400
+    assert response.json() == {"error": "invalid_request"}
+    assert api.called("generate") == 0
+
+
+def test_the_language_is_returned_with_each_suggestion(api):
+    """The browser holds every language's suggestions at once and shows the
+    ones matching the screen, so it cannot do that without this field."""
+    api.on_generate = [FakeSuggestion("湯頭很濃郁。", language="zh-Hant")]
+
+    item = api.post(SUGGEST, json={"language": "zh-Hant"}).json()["suggestions"][0]
+
+    assert item["language"] == "zh-Hant"
