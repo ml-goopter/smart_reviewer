@@ -22,10 +22,11 @@ if (root !== null) {
     // request reach production, and each one costs money and a cap slot.
     <StrictMode>
       <ErrorBoundary>
-        {/* Above App, because the customer-facing screens are spread across
-          * two levels: App renders the unavailable screen itself, and Reviewer
-          * renders the rest. The internal crawler sits inside this too and
-          * simply never reads it — it stays in English. */}
+        {/* Above App, because every screen under it reads the catalogue and
+          * they are spread across two levels: App renders the unavailable
+          * screen itself, Reviewer renders the customer's, and the internal
+          * crawler its own. One provider, so the language chosen in the drawer
+          * is the same choice on either side of the tool. */}
         <LocaleProvider>
           <App route={route} />
         </LocaleProvider>
