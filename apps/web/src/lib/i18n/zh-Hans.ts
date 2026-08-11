@@ -116,7 +116,7 @@ export const zhHans: Messages = {
       cafe: '咖啡馆',
       bar: '酒吧',
       bakery: '烘焙店',
-      meal_takeaway: '外卖',
+      meal_takeaway: '外带',
       hair_salon: '美发沙龙',
       nail_salon: '美甲沙龙',
       spa: 'SPA',
@@ -154,7 +154,8 @@ export const zhHans: Messages = {
       submit: '搜索',
       submitting: '搜索中…',
       note: '必须填写类别或关键词，地点只说明在哪里找，不说明要找什么。',
-      resolved: (place: string) => `搜索范围：${place} 附近`,
+      resolvedBefore: '搜索范围：',
+      resolvedAfter: ' 附近',
       funnel: (searched: number, matched: number) =>
         `已搜索 ${searched} 家商户 · 符合 ${matched} 家`,
       partial: 'Google 中途返回错误，这批结果并不完整。',
@@ -172,6 +173,8 @@ export const zhHans: Messages = {
       save: '保存',
       saving: '保存中…',
       alreadySaved: (name: string) => `${name} 此前已保存，现有记录未更改。`,
+      willNotOpen: (name: string, status: string) =>
+        `${name}：状态为 ${status}，此网址无法打开`,
     },
 
     saved: {
@@ -220,7 +223,7 @@ export const zhHans: Messages = {
         menuItems: { label: '菜品' },
         sellingPoints: {
           label: '卖点',
-          hint: '常客真正称赞的地方。默认取自 Google 的属性（堂食、外卖），但那些每家都有，请换成这家真正与众不同的地方。',
+          hint: '常客真正称赞的地方。默认取自 Google 的属性（堂食、外带），但那些每家都有，请换成这家真正与众不同的地方。',
         },
         approvedKeywords: {
           label: '可用关键词',

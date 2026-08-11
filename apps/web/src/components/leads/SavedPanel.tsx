@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { useMessages } from '../../lib/i18n/context'
+import { useLocale, useMessages } from '../../lib/i18n/context'
 import { fetchSaved } from '../../lib/leadsApi'
 import type { SavedMerchant } from '../../lib/leadTypes'
 import { CopyButton } from './CopyButton'
 
-function day(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
+/** Formatted for the language on screen rather than for the machine: the
+ *  column heading beside it is translated, and the two disagreeing reads as a
+ *  screen half-swapped. */
+function day(iso: string, locale: string): string {
+  return new Date(iso).toLocaleDateString(locale, {
     day: '2-digit',
     month: 'short',
   })
@@ -34,6 +37,7 @@ function append(
 export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void }) {
   const leads = useMessages().leads
   const t = leads.saved
+  const { locale } = useLocale()
 
   const [merchants, setMerchants] = useState<SavedMerchant[] | null>(null)
   const [error, setError] = useState(false)
@@ -123,7 +127,7 @@ export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void })
                 </span>
               </td>
               <td>{merchant.status}</td>
-              <td>{day(merchant.createdAt)}</td>
+              <td>{day(merchant.createdAt, locale)}</td>
               <td className="lead-actions">
                 {merchant.url === null ? (
                   <span className="lead-sub">{leads.noUrl}</span>

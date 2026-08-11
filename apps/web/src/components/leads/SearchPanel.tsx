@@ -17,20 +17,34 @@ import type {
 } from '../../lib/leadTypes'
 import { CopyButton } from './CopyButton'
 
-/** The API's `error` code to copy the operator can act on.
+/** What went wrong, in a form that survives a language change.
  *
- *  Indexed with a widened type because the code arrives from the server: one
- *  this build has no entry for falls back to the status rather than to
- *  `undefined` rendering as a blank error. */
-function message(failures: Messages['leads']['failures'], error: unknown): string {
-  if (error instanceof LeadFailure) {
-    const known = (failures as Record<string, unknown>)[error.code]
-    // Typed rather than assumed: `status` in the same namespace is a function,
-    // and a server code colliding with it would otherwise render as source.
-    return typeof known === 'string' ? known : failures.status(error.status)
-  }
-  return failures.unknown
+ *  A rendered sentence would not: the drawer re-renders the whole screen, and
+ *  a message put into state before the switch would still be sitting there in
+ *  the language it was written in. */
+type Failure = { code: string; status: number } | 'unreachable'
+
+/** The API's `error` code to copy the operator can act on. */
+function message(failures: Messages['leads']['failures'], failure: Failure): string {
+  if (failure === 'unreachable') return failures.unknown
+
+  const known = (failures as Record<string, unknown>)[failure.code]
+  // Typed rather than assumed: `status` in the same namespace is a function,
+  // and a server code colliding with it would otherwise render as source.
+  return typeof known === 'string' ? known : failures.status(failure.status)
 }
+
+function failureOf(error: unknown): Failure {
+  return error instanceof LeadFailure
+    ? { code: error.code, status: error.status }
+    : 'unreachable'
+}
+
+/** The outcome of a save that is worth saying, again as data rather than as a
+ *  sentence — same reason as `Failure`. */
+type Notice =
+  | { kind: 'already-saved'; name: string }
+  | { kind: 'will-not-open'; name: string; status: string }
 
 function distance(metres: number | null): string {
   if (metres === null) return '—'
@@ -101,14 +115,14 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
   const [restored] = useState(() => loadCriteria())
   const [response, setResponse] = useState<LeadSearchResponse | null>(() => loadResults())
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Failure | 'criteria_too_broad' | null>(null)
   // Every save in flight, not the last one: with a single id, finishing row A
   // clears row B's "Saving…" and re-enables its button mid-POST, which invites
   // a duplicate save.
   const [saving, setSaving] = useState<readonly string[]>([])
   // What the save response said beyond the row itself — an existing row was
   // returned unchanged, or its status means the URL will not open.
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
 
   const initial = restored ?? DEFAULT_CRITERIA
   const [category, setCategory] = useState(initial.category ?? '')
@@ -140,7 +154,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
     if (!hasSubject(criteria)) {
       // Nothing is sent: the same refusal the server would give, without the
       // round trip or the billed geocode behind it.
-      setError(leads.failures.criteria_too_broad)
+      setError('criteria_too_broad')
       setResponse(null)
       return
     }
@@ -151,7 +165,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
       setResponse(await search(criteria))
     } catch (failure) {
       setResponse(null)
-      setError(message(leads.failures, failure))
+      setError(failureOf(failure))
     } finally {
       setBusy(false)
     }
@@ -166,12 +180,19 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
       // `created` and `note` are the whole difference between a fresh save and
       // one that found an existing row — including an archived one, whose URL
       // will not open. Neither is visible in the patched row.
+      // The server's own `note` is prose, and it is derived from the status
+      // alone — so the status is kept and the sentence written here, rather
+      // than putting an English line under a Chinese header.
       setNotice(
         saved.note !== null
-          ? `${saved.merchant.name}: ${saved.note}`
+          ? {
+            kind: 'will-not-open',
+            name: saved.merchant.name,
+            status: saved.merchant.status,
+          }
           : saved.created
             ? null
-            : t.alreadySaved(saved.merchant.name),
+            : { kind: 'already-saved', name: saved.merchant.name },
       )
       // Patch just this row rather than re-running the search: a second search
       // is a second bill, and the operator's list would reorder underneath them.
@@ -194,7 +215,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
           },
       )
     } catch (failure) {
-      setError(message(leads.failures, failure))
+      setError(failureOf(failure))
     } finally {
       setSaving((current) => current.filter((placeId) => placeId !== result.placeId))
     }
@@ -315,8 +336,20 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
           arrives in the same commit as its first text is usually not announced
           at all, so a failed search would be silent. */}
       <div role="status" aria-live="polite">
-        {error !== null && <p className="lead-error">{error}</p>}
-        {notice !== null && <p className="lead-warning">{notice}</p>}
+        {error !== null && (
+          <p className="lead-error">
+            {error === 'criteria_too_broad'
+              ? leads.failures.criteria_too_broad
+              : message(leads.failures, error)}
+          </p>
+        )}
+        {notice !== null && (
+          <p className="lead-warning">
+            {notice.kind === 'already-saved'
+              ? t.alreadySaved(notice.name)
+              : t.willNotOpen(notice.name, notice.status)}
+          </p>
+        )}
       </div>
 
       {/* The funnel and the empty-list explanation are what a search says; the
@@ -325,7 +358,9 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
         {response !== null && (
           <>
             <p className="lead-resolved">
-              {t.resolved(response.resolvedLocation.formatted)}
+              {t.resolvedBefore}
+              <strong>{response.resolvedLocation.formatted}</strong>
+              {t.resolvedAfter}
             </p>
             <p className="lead-funnel">{t.funnel(response.searched, response.matched)}</p>
             {response.partial && (

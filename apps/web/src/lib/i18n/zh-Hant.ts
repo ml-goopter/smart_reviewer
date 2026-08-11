@@ -156,9 +156,10 @@ export const zhHant: Messages = {
       submit: '搜尋',
       submitting: '搜尋中…',
       note: '必須填寫類別或關鍵字，地點只說明在哪裡找，不說明要找什麼。',
-      resolved: (place: string) => `搜尋範圍：${place} 附近`,
+      resolvedBefore: '搜尋範圍：',
+      resolvedAfter: ' 附近',
       funnel: (searched: number, matched: number) =>
-        `已搜尋 ${searched} 筆商家 · 符合 ${matched} 筆`,
+        `已搜尋 ${searched} 筆商戶 · 符合 ${matched} 筆`,
       partial: 'Google 中途回傳錯誤，這批結果並不完整。',
       truncated:
         '已達結果數量上限，Google 還有更多。請縮小搜尋範圍，或調高 LEAD_SEARCH_MAX_RESULTS。',
@@ -174,6 +175,8 @@ export const zhHant: Messages = {
       save: '儲存',
       saving: '儲存中…',
       alreadySaved: (name: string) => `${name} 先前已儲存，現有資料未變更。`,
+      willNotOpen: (name: string, status: string) =>
+        `${name}：狀態為 ${status}，此網址無法開啟`,
     },
 
     saved: {

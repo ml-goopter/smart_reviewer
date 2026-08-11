@@ -201,7 +201,11 @@ export const en = {
       /** Stated up front rather than only after a refusal: the requirement is
        *  not guessable from a form whose only required field is the location. */
       note: 'A category or a text query is required — the location says where to look, not what for.',
-      resolved: (place: string) => `Searched around ${place}`,
+      /* Split so the geocoded place can stay emphasised — it is the one
+       * thing the operator checks to confirm Google understood the query —
+       * while each language keeps its own word order around it. */
+      resolvedBefore: 'Searched around ',
+      resolvedAfter: '.',
       funnel: (searched: number, matched: number) =>
         `${searched} listings searched · ${matched} matched`,
       partial: 'Google returned an error partway through — these results are incomplete.',
@@ -220,6 +224,12 @@ export const en = {
       saving: 'Saving…',
       alreadySaved: (name: string) =>
         `${name} was already saved — the existing row is unchanged.`,
+      /** The save found a row whose status means the URL is dead. The server
+       *  sends prose for this; it is derived from the status alone, so it is
+       *  written here instead — English prose under a Chinese header is worse
+       *  than one round trip's worth of duplication. */
+      willNotOpen: (name: string, status: string) =>
+        `${name}: ${status.toLowerCase()} — this URL will not open`,
     },
 
     saved: {

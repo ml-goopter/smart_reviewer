@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { useMessages } from '../../lib/i18n/context'
+import { useLocale, useMessages } from '../../lib/i18n/context'
 import { LeadFailure, fetchContext, putContext } from '../../lib/leadsApi'
 import type { MerchantContext, ReviewContext } from '../../lib/leadTypes'
 import { TopBar } from '../TopBar'
@@ -116,18 +116,18 @@ export function ContextEditor({
 }) {
   const leads = useMessages().leads
   const t = leads.editor
+  // A date under a Chinese header should not be formatted for whatever the
+  // machine happens to be set to.
+  const { locale } = useLocale()
 
   const [loaded, setLoaded] = useState<MerchantContext | null>(null)
   const [form, setForm] = useState<FormText>(EMPTY)
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
-  const [error, setError] = useState<string | null>(null)
-
-  /* The catalogue, readable inside an effect and a handler without either
-   * depending on it. Both set an error message, and the language on screen at
-   * the moment it is set is the one to word it in — but adding `t` to the
-   * effect below would refetch the merchant on every language change. */
-  const wording = useRef(t)
-  wording.current = t
+  /* Which failure, not its wording. A rendered sentence would still be sitting
+   * there in the old language after the drawer changes it — and the effect
+   * below must not depend on the catalogue, or every language change would
+   * refetch the merchant. */
+  const [error, setError] = useState<'load' | 'save' | 'link' | null>(null)
 
   useEffect(() => {
     fetchContext(merchantId)
@@ -135,7 +135,7 @@ export function ContextEditor({
         setLoaded(body)
         setForm(textFrom(body.context))
       })
-      .catch(() => setError(wording.current.loadFailed))
+      .catch(() => setError('load'))
   }, [merchantId])
 
   /** Any edit un-says "Saved". Leaving the confirmation up over changed text
@@ -156,11 +156,20 @@ export function ContextEditor({
       setStatus('idle')
       setError(
         failure instanceof LeadFailure && failure.code === 'instructions_contain_url'
-          ? wording.current.linkRejected
-          : wording.current.saveFailed,
+          ? 'link'
+          : 'save',
       )
     }
   }
+
+  const wording =
+    error === null
+      ? null
+      : error === 'load'
+        ? t.loadFailed
+        : error === 'link'
+          ? t.linkRejected
+          : t.saveFailed
 
   // `.leads` is the page frame — max width, gutters, type. The editor is its
   // own route, so it has to carry the frame itself; without it the form runs
@@ -170,7 +179,7 @@ export function ContextEditor({
       <div className="leads">
         <TopBar />
         <p className="lead-error" role="alert">
-          {error}
+          {wording}
         </p>
       </div>
     )
@@ -209,7 +218,9 @@ export function ContextEditor({
               {loaded.merchant.googleSyncedAt !== null && (
                 <>
                   {' '}
-                  {t.asOf(new Date(loaded.merchant.googleSyncedAt).toLocaleDateString())}
+                  {t.asOf(
+                    new Date(loaded.merchant.googleSyncedAt).toLocaleDateString(locale),
+                  )}
                 </>
               )}
             </>
@@ -304,7 +315,7 @@ export function ContextEditor({
             arrives in the same commit as its first text is usually not
             announced at all. */}
         <div role="status" aria-live="polite">
-          {error !== null && <p className="lead-error">{error}</p>}
+          {wording !== null && <p className="lead-error">{wording}</p>}
         </div>
 
         {/* Sticky: the form is now taller than a viewport, and a save button
