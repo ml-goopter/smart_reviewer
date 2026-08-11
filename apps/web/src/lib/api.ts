@@ -1,3 +1,4 @@
+import type { Locale } from './i18n'
 import type { FailureKind, GeneratedBatch, Session, Suggestion } from './types'
 
 /* The four calls the SPA makes. `POST /api/review/sessions` is absent on
@@ -76,10 +77,13 @@ export async function loadSession(token: string): Promise<Session> {
   return data
 }
 
-export async function generateSuggestions(token: string): Promise<GeneratedBatch> {
+export async function generateSuggestions(
+  token: string,
+  language: Locale,
+): Promise<GeneratedBatch> {
   const response = await request(
     `/api/review/sessions/${encodeURIComponent(token)}/suggestions`,
-    { method: 'POST', headers: json, body: '{}' },
+    { method: 'POST', headers: json, body: JSON.stringify({ language }) },
   )
 
   const data = (await response.json()) as GeneratedBatch

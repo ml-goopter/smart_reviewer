@@ -3,10 +3,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiFailure, completeSession, generateSuggestions, loadSession, selectSuggestion } from '../lib/api'
 import { clearDraft, loadDraft, saveDraft } from '../lib/draft'
 import { useFocusOnMount } from '../lib/a11y'
+import { useLocale, useMessages } from '../lib/i18n/context'
+import type { Locale } from '../lib/i18n'
 import type { FailureKind, Session, Suggestion } from '../lib/types'
 import { ErrorState, LoadingState, UnavailableState } from './states'
 import { GenerationNotice, SuggestionCard, SuggestionSkeletons } from './SuggestionList'
 import { SelectedReviewEditor } from './SelectedReviewEditor'
+import { TopBar } from './TopBar'
 
 type Phase =
   | { name: 'loading' }
@@ -15,11 +18,16 @@ type Phase =
   | { name: 'error' }
 
 export function Reviewer({ token }: { token: string }) {
+  const messages = useMessages()
+  const { locale } = useLocale()
+
   const [phase, setPhase] = useState<Phase>({ name: 'loading' })
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [generating, setGenerating] = useState(false)
   const [genFailure, setGenFailure] = useState<FailureKind | null>(null)
-  const [capReached, setCapReached] = useState(false)
+  /* The cap is per language, so this is a list rather than a flag: English
+   * being spent says nothing about whether Chinese is. */
+  const [cappedLanguages, setCappedLanguages] = useState<Locale[]>([])
 
   const [editing, setEditing] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -33,9 +41,11 @@ export function Reviewer({ token }: { token: string }) {
    * a render behind, and both Strict Mode's double-invoked effect and an
    * impatient double-tap fire well inside that window. */
   const generatingRef = useRef(false)
-  /* Never reset. The first batch is requested exactly once per mount, whatever
-   * Strict Mode does to the effect around it. */
-  const firstBatchRef = useRef(false)
+  /* Which languages have had their first batch requested. Never cleared, so
+   * each language asks exactly once per mount whatever Strict Mode does to
+   * the effect around it — and so a language whose generation failed shows
+   * its notice rather than retrying on a loop. */
+  const requestedRef = useRef<Set<Locale>>(new Set())
   /* The redirect happens once. A second tap would double-count the completion
    * metric and race the navigation. The ref is the guard — it is readable
    * synchronously, before any re-render — and the state is only so the button
@@ -43,24 +53,49 @@ export function Reviewer({ token }: { token: string }) {
   const leavingRef = useRef(false)
   const [leaving, setLeaving] = useState(false)
 
-  /* How many suggestions are on screen, readable synchronously. `generate` is
-   * a useCallback keyed on the token, so the `suggestions` it closes over is
-   * stale by the time an await resolves. Only the wording of an announcement
-   * depends on this. Kept in step by hand at the two places suggestions are
-   * set — never inside the state updater, which Strict Mode double-invokes. */
-  const countRef = useRef(0)
+  /* Everything the session holds, in every language, readable synchronously.
+   * `generate` is a useCallback keyed on the token, so the `suggestions` it
+   * closes over is stale by the time an await resolves. Read rather than
+   * counted by hand: the count is now per language, and a hand-maintained
+   * counter would have to be kept in step at every place suggestions are
+   * set. */
+  const suggestionsRef = useRef(suggestions)
+  suggestionsRef.current = suggestions
+
+  /* The language to generate in, for the same reason the catalogue is a ref:
+   * putting it in `generate`'s dependencies would re-run the session load. */
+  const localeRef = useRef(locale)
+  localeRef.current = locale
+
+  /* The catalogue, readable synchronously, for the same reason countRef exists:
+   * `generate` is keyed on the token alone. Adding the catalogue to its
+   * dependencies would change its identity on every language change, and the
+   * session-loading effect below depends on `generate` — so switching language
+   * would re-run GET /sessions, which is a write (it marks the session opened)
+   * and would reset the list. Assigned during render so an announcement made
+   * after an await is worded in the language on screen now, not the one that
+   * was on screen when the request went out. */
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
 
   const generate = useCallback(async () => {
     if (generatingRef.current) return
     generatingRef.current = true
 
+    // Read once, before the first await. The customer may open the drawer
+    // while this is in flight, and the batch that comes back belongs to the
+    // language it was asked for — not to whichever is on screen when it lands.
+    const language = localeRef.current
+
     setGenerating(true)
     setGenFailure(null)
-    setAnnouncement('Writing suggestions…')
+    setAnnouncement(messagesRef.current.announce.generating)
 
     try {
-      const batch = await generateSuggestions(token)
-      const isFirst = countRef.current === 0
+      const batch = await generateSuggestions(token, language)
+      const isFirst = !suggestionsRef.current.some(
+        (item) => item.language === language,
+      )
 
       // Appended, never replaced. A customer who liked the second card and
       // pressed Generate More could otherwise never get it back, and at the
@@ -70,13 +105,9 @@ export function Reviewer({ token }: { token: string }) {
       setSuggestions((current) => [...current, ...batch.suggestions])
 
       const added = batch.suggestions.length
-      countRef.current += added
-      const plural = added === 1 ? '' : 's'
-      setAnnouncement(
-        isFirst
-          ? `${added} suggestion${plural} ready.`
-          : `${added} more suggestion${plural} added below.`,
-      )
+
+      const { announce } = messagesRef.current
+      setAnnouncement(isFirst ? announce.ready(added) : announce.added(added))
     } catch (error) {
       const kind = error instanceof ApiFailure ? error.kind : 'server'
 
@@ -85,9 +116,13 @@ export function Reviewer({ token }: { token: string }) {
       if (kind === 'session-gone') {
         setPhase({ name: 'gone' })
       } else {
-        if (kind === 'rate-limited') setCapReached(true)
+        if (kind === 'rate-limited') {
+          setCappedLanguages((current) =>
+            current.includes(language) ? current : [...current, language],
+          )
+        }
         setGenFailure(kind)
-        setAnnouncement("We couldn't generate new suggestions right now.")
+        setAnnouncement(messagesRef.current.announce.generateFailed)
       }
     } finally {
       generatingRef.current = false
@@ -105,25 +140,17 @@ export function Reviewer({ token }: { token: string }) {
 
         setPhase({ name: 'ready', session })
         setSuggestions(session.suggestions)
-        countRef.current = session.suggestions.length
 
         // Restored before anything is generated: a customer returning from
         // Google already has a review, and spending a cap slot to regenerate
-        // suggestions they will never see is pure waste.
+        // suggestions they will never see is pure waste. The effect below
+        // holds off while `editing` is set, for the same reason.
         const draft = loadDraft(token)
         if (draft && draft.selectedId !== null) {
           setSelectedId(draft.selectedId)
           setOriginalText(draft.originalText)
           setReviewText(draft.reviewText)
           setEditing(true)
-          return
-        }
-
-        // GET never generates (R4), so an empty list is the normal first load
-        // rather than a failure.
-        if (session.suggestions.length === 0 && !firstBatchRef.current) {
-          firstBatchRef.current = true
-          void generate()
         }
       } catch (error) {
         if (!live) return
@@ -136,7 +163,44 @@ export function Reviewer({ token }: { token: string }) {
     return () => {
       live = false
     }
-  }, [token, generate])
+  }, [token])
+
+  /* Switching language returns the customer to the list and drops whatever was
+   * selected: the editor holds a suggestion in a language that is no longer on
+   * screen, and the list behind it is about to be a different one.
+   *
+   * Guarded on the previous value rather than skipping a "first run" flag,
+   * because Strict Mode mounts effects twice and a flag would burn its skip on
+   * the duplicate. */
+  const previousLocale = useRef(locale)
+
+  useEffect(() => {
+    if (previousLocale.current === locale) return
+    previousLocale.current = locale
+
+    backToSuggestions()
+    // Belongs to the batch that failed, in a language no longer on screen.
+    setGenFailure(null)
+  }, [locale])
+
+  /* Whatever language is on screen gets a batch, or a request for one.
+   *
+   * This is the only place a generation starts on its own, first load and
+   * language switch alike — they are the same condition, and writing them
+   * separately is how one of them ends up spending a slot the other already
+   * spent. GET never generates (R4), so an empty list is the normal first
+   * load rather than a failure. */
+  useEffect(() => {
+    if (phase.name !== 'ready') return
+    // The customer has a review in hand; the list behind it can wait until
+    // they ask for it.
+    if (editing) return
+    if (requestedRef.current.has(locale)) return
+    if (suggestionsRef.current.some((item) => item.language === locale)) return
+
+    requestedRef.current.add(locale)
+    void generate()
+  }, [phase.name, locale, editing, generate])
 
   // Persisted on every edit rather than on leave: `pagehide` is unreliable on
   // iOS, and this is the state the whole back-button guarantee rests on.
@@ -191,10 +255,14 @@ export function Reviewer({ token }: { token: string }) {
     // cross-origin assignment — this is also the only thing that tells the
     // customer anything happened at all.
     setLeaving(true)
-    setAnnouncement('Opening Google.')
+    setAnnouncement(messages.announce.opening)
 
     window.location.href = phase.session.googleReviewUrl
   }
+
+  /* Only the language on screen. The session holds every language it has
+   * generated in, so switching back to one is a filter rather than a fetch. */
+  const visible = suggestions.filter((item) => item.language === locale)
 
   /** Back to the list. Without this the first tap on a card is irreversible for
    *  the life of the tab: the draft restores on every load, so returning from
@@ -220,16 +288,22 @@ export function Reviewer({ token }: { token: string }) {
         {announcement}
       </div>
 
+      {/* Keyed on the locale so a language change remounts the screen, which
+        * is what re-runs useFocusOnMount. Every other stage change here is a
+        * fresh mount already; without this one, switching language would swap
+        * every word on the page and give a screen reader no reason to start
+        * reading it. */}
       <Stage
+        key={locale}
         phase={phase}
         editing={editing}
         reviewText={reviewText}
         originalText={originalText}
         leaving={leaving}
-        suggestions={suggestions}
+        suggestions={visible}
         generating={generating}
         genFailure={genFailure}
-        capReached={capReached}
+        capReached={cappedLanguages.includes(locale)}
         onChange={setReviewText}
         onReset={() => setReviewText(originalText)}
         onBack={backToSuggestions}
@@ -287,7 +361,7 @@ function Stage({
     <main className="app">
       {editing ? (
         <>
-          <div className="brand">Goopter</div>
+          <TopBar />
           <hr className="divider" />
           <SelectedReviewEditor
             value={reviewText}
@@ -338,11 +412,15 @@ function Suggestions({
   onSkip: () => void
 }) {
   const heading = useFocusOnMount<HTMLHeadingElement>()
+  const messages = useMessages()
 
   return (
     <>
+      <TopBar />
+
       <div className="stack">
-        <div className="brand">Goopter</div>
+        {/* Merchant name and category are data, not copy — they stay in
+          * whatever language the merchant registered them in. */}
         <h1 className="merchant">{merchantName}</h1>
         {category !== null && <div className="category">{category}</div>}
       </div>
@@ -351,9 +429,9 @@ function Suggestions({
 
       <div className="stack">
         <h2 className="question" tabIndex={-1} ref={heading}>
-          How was your experience?
+          {messages.suggestions.heading}
         </h2>
-        <p className="lead">Here are a few ideas to help you write your review.</p>
+        <p className="lead">{messages.suggestions.lead}</p>
       </div>
 
       {genFailure !== null && (
@@ -378,21 +456,18 @@ function Suggestions({
         * than an absent one. Google stays reachable either way. */}
       {!capReached && (
         <button className="btn btn--line" disabled={generating} onClick={onGenerate}>
-          {generating ? 'Generating…' : 'Generate more suggestions'}
+          {generating ? messages.suggestions.generating : messages.suggestions.generateMore}
         </button>
       )}
 
       <div className="own">
-        <span className="own__hint">Prefer to write your own?</span>
+        <span className="own__hint">{messages.suggestions.ownHint}</span>
         <button className="link" onClick={onSkip}>
-          Continue to Google →
+          {messages.suggestions.skip}
         </button>
       </div>
 
-      <p className="authenticity">
-        Only use wording that reflects your genuine experience. You can edit any
-        suggestion before posting.
-      </p>
+      <p className="authenticity">{messages.suggestions.authenticity}</p>
     </>
   )
 }

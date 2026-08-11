@@ -1,3 +1,5 @@
+import type { Locale } from './i18n'
+
 /* Wire shapes, mirroring apps/api/app/schemas.py.
  *
  * The API serialises to camelCase via Pydantic `serialization_alias`, so these
@@ -8,6 +10,11 @@
 export type Suggestion = {
   id: string
   text: string
+  /** Which language this suggestion was drafted in. The server returns every
+   *  language the session has generated in at once and the screen shows only
+   *  the matching ones — filtering server-side would make each switch a
+   *  round-trip, and GET /sessions is a write that marks the session opened. */
+  language: Locale
 }
 
 export type Merchant = {

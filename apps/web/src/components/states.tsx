@@ -1,4 +1,6 @@
 import { useFocusOnMount } from '../lib/a11y'
+import { useMessages } from '../lib/i18n/context'
+import { TopBar } from './TopBar'
 
 /* The screens with no merchant on them.
  *
@@ -9,11 +11,13 @@ import { useFocusOnMount } from '../lib/a11y'
  */
 
 export function LoadingState() {
+  const messages = useMessages()
+
   return (
     <main className="app app--center">
       <div className="brand brand--lg">Goopter</div>
-      <div className="spinner" role="status" aria-label="Preparing your review" />
-      <p className="sub">Preparing your review…</p>
+      <div className="spinner" role="status" aria-label={messages.loading.label} />
+      <p className="sub">{messages.loading.text}</p>
     </main>
   )
 }
@@ -29,25 +33,13 @@ export function UnavailableState({ reason }: { reason: 'link' | 'session' | 'bus
   // A heading, not a paragraph: §49 says to move focus to the new heading, and
   // these screens have no other text to structure the document around.
   const heading = useFocusOnMount<HTMLHeadingElement>()
-
-  const copy = {
-    link: {
-      message: 'This review link is no longer available.',
-      advice: 'Please ask the business for assistance.',
-    },
-    session: {
-      message: 'This review session is no longer available.',
-      advice: "Please scan the business's review QR code again.",
-    },
-    busy: {
-      message: 'This review link is busy right now.',
-      advice: 'Please scan the QR code again in a few minutes.',
-    },
-  }[reason]
+  const copy = useMessages().unavailable[reason]
 
   return (
     <main className="app app--center">
-      <div className="brand">Goopter</div>
+      {/* The instruction below is the whole point of this screen, so it has to
+        * be readable — a customer who cannot read it just leaves. */}
+      <TopBar />
       <h1 className="message" tabIndex={-1} ref={heading}>
         {copy.message}
       </h1>
@@ -58,16 +50,17 @@ export function UnavailableState({ reason }: { reason: 'link' | 'session' | 'bus
 
 export function ErrorState({ onRetry }: { onRetry: () => void }) {
   const heading = useFocusOnMount<HTMLHeadingElement>()
+  const messages = useMessages()
 
   return (
     <main className="app app--center">
-      <div className="brand">Goopter</div>
+      <TopBar />
       <h1 className="message" tabIndex={-1} ref={heading}>
-        Something went wrong.
+        {messages.error.message}
       </h1>
-      <p className="sub">Please try again.</p>
+      <p className="sub">{messages.error.advice}</p>
       <button className="btn btn--primary" style={{ maxWidth: 280 }} onClick={onRetry}>
-        Try again
+        {messages.error.retry}
       </button>
     </main>
   )

@@ -95,14 +95,30 @@ describe('loadSession', () => {
 })
 
 describe('generateSuggestions', () => {
-  it('posts an empty object body', async () => {
-    const fetchMock = respond(201, { suggestions: [{ id: '1', text: 'x' }] })
+  it('names the language in the body', async () => {
+    const fetchMock = respond(201, {
+      suggestions: [{ id: '1', text: 'x', language: 'zh-Hant' }],
+    })
     vi.stubGlobal('fetch', fetchMock)
 
-    const batch = await generateSuggestions('t')
+    const batch = await generateSuggestions('t', 'zh-Hant')
 
-    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'POST', body: '{}' })
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({
+      method: 'POST',
+      body: '{"language":"zh-Hant"}',
+    })
     expect(batch.suggestions).toHaveLength(1)
+  })
+
+  it('drops a malformed suggestion rather than rendering undefined', async () => {
+    const fetchMock = respond(201, {
+      suggestions: [{ id: '1', text: 'x', language: 'en' }, { id: 2 }, null],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const batch = await generateSuggestions('t', 'en')
+
+    expect(batch.suggestions).toEqual([{ id: '1', text: 'x', language: 'en' }])
   })
 })
 

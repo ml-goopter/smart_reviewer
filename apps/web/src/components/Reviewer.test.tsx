@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 
+import { LocaleProvider } from '../lib/i18n/context'
 import { Reviewer } from './Reviewer'
 
 /* The constraints §49 calls "easy to get wrong" — one generation ever, the
@@ -21,8 +22,8 @@ const SESSION = {
 
 const BATCH = {
   suggestions: [
-    { id: 's1', text: 'The beef pho was excellent.' },
-    { id: 's2', text: 'Service was quick and friendly.' },
+    { id: 's1', text: 'The beef pho was excellent.', language: 'en' },
+    { id: 's2', text: 'Service was quick and friendly.', language: 'en' },
   ],
 }
 
@@ -91,7 +92,11 @@ afterEach(() => {
 })
 
 async function mount(strict = false) {
-  const tree = <Reviewer token={TOKEN} />
+  const tree = (
+    <LocaleProvider initial="en">
+      <Reviewer token={TOKEN} />
+    </LocaleProvider>
+  )
   render(strict ? <StrictMode>{tree}</StrictMode> : tree)
   await screen.findByText('Pho 37')
 }
@@ -165,7 +170,9 @@ describe('suggestions accumulate', () => {
       suggestions: () => {
         call += 1
         return jsonResponse(201, {
-          suggestions: [{ id: `b${call}`, text: `Batch ${call} suggestion.` }],
+          suggestions: [
+            { id: `b${call}`, text: `Batch ${call} suggestion.`, language: 'en' },
+          ],
         })
       },
     })
@@ -232,7 +239,11 @@ describe('the editor', () => {
 
     cleanup()
     const second = stubApi()
-    render(<Reviewer token={TOKEN} />)
+    render(
+      <LocaleProvider initial="en">
+        <Reviewer token={TOKEN} />
+      </LocaleProvider>,
+    )
 
     await waitFor(() => {
       expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(
@@ -325,7 +336,11 @@ describe('continue to Google', () => {
 describe('a dead token is terminal wherever it surfaces', () => {
   it('shows the rescan advice when the session load 410s', async () => {
     stubApi({ session: () => jsonResponse(410, { error: 'session_unavailable' }) })
-    render(<Reviewer token={TOKEN} />)
+    render(
+      <LocaleProvider initial="en">
+        <Reviewer token={TOKEN} />
+      </LocaleProvider>,
+    )
 
     await screen.findByText(/this review session is no longer available/i)
     // Never the cause, and never the merchant.
@@ -337,7 +352,11 @@ describe('a dead token is terminal wherever it surfaces', () => {
       session: () =>
         jsonResponse(200, { ...SESSION, googleReviewUrl: "javascript:alert('x')" }),
     })
-    render(<Reviewer token={TOKEN} />)
+    render(
+      <LocaleProvider initial="en">
+        <Reviewer token={TOKEN} />
+      </LocaleProvider>,
+    )
 
     await screen.findByText(/no longer available/i)
     expect(assigned).toEqual([])
@@ -347,7 +366,11 @@ describe('a dead token is terminal wherever it surfaces', () => {
 describe('announcements', () => {
   it('mounts the live region before there is anything to announce', async () => {
     stubApi({ session: () => jsonResponse(200, SESSION) })
-    render(<Reviewer token={TOKEN} />)
+    render(
+      <LocaleProvider initial="en">
+        <Reviewer token={TOKEN} />
+      </LocaleProvider>,
+    )
 
     // Present during loading, i.e. before the first message. A live region
     // inserted together with its text is usually not announced at all.
