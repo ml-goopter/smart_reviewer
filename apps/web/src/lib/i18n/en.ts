@@ -6,8 +6,9 @@
  * ever looked up by a key assembled at runtime, so there is no missing-message
  * fallback to design and no reason for a lookup to return undefined.
  *
- * Customer-facing screens only. The lead crawler under /leads is an internal
- * tool that only the operator ever sees and stays in English.
+ * Customer-facing screens and the internal lead crawler under /leads. The
+ * crawler is kept in its own `leads` namespace: it shares the language choice
+ * and the drawer that makes it, and nothing else.
  *
  * The two count-bearing entries are functions rather than strings with a
  * placeholder: English needs a plural form here and Chinese has none, and one
@@ -119,6 +120,189 @@ export const en = {
     continue: 'Continue to Google Reviews',
     back: '← Choose a different suggestion',
     authenticity: 'Only use wording that reflects your genuine experience.',
+  },
+
+  /* The internal lead crawler under /leads.
+   *
+   * Translated for the same reason the customer screens are: the operator
+   * prospecting Chinese-speaking merchants is as likely to read Chinese as
+   * they are. Nothing here is customer-facing, so the register is the
+   * operator's — terse, and it keeps the words the API and Google use.
+   *
+   * Merchant names, addresses, slugs and statuses stay as the server sent
+   * them. They are data, not copy. */
+  leads: {
+    title: 'Lead crawler',
+    viewsLabel: 'Lead crawler views',
+    tabs: {
+      search: 'Search',
+      saved: 'Saved',
+    },
+    loading: 'Loading…',
+    edit: 'Edit',
+    copyUrl: 'Copy URL',
+    /** Reads as a fragment because it follows the merchant's status: an
+     *  archived row has no working URL to copy. */
+    noUrl: 'no URL',
+
+    /** Keyed by the value the server sends rather than by its label, so the
+     *  server stays the authority on which categories exist. One it adds
+     *  before this list catches up falls back to the English label it sent,
+     *  which is better than an option that renders blank. */
+    categories: {
+      restaurant: 'Restaurant',
+      cafe: 'Cafe',
+      bar: 'Bar',
+      bakery: 'Bakery',
+      meal_takeaway: 'Takeout',
+      hair_salon: 'Hair salon',
+      nail_salon: 'Nail salon',
+      spa: 'Spa',
+      gym: 'Gym',
+      dentist: 'Dentist',
+      car_repair: 'Auto repair',
+      florist: 'Florist',
+      pet_store: 'Pet store',
+      book_store: 'Book store',
+    },
+
+    /* Keyed by the machine-readable `error` the API returns. Unlike the
+     * customer-facing screens — which decide from the status code alone so a
+     * private cause cannot leak — this is an internal tool, and the operator
+     * is the person who has to act on the distinction. */
+    failures: {
+      criteria_too_broad:
+        'Add a category or a text query — a location alone does not say what to look for.',
+      location_not_found: 'Google does not recognise that location. Check the spelling.',
+      unknown_category: 'That category is not one the server accepts.',
+      invalid_rating_range: 'The minimum rating is above the maximum.',
+      invalid_request: 'Some criteria are out of range.',
+      provider_unavailable: 'Google did not answer. Try again in a moment.',
+      network: 'Could not reach the API.',
+      /** A code this build has no copy for. The status is included because the
+       *  operator can act on it and there is no customer to protect. */
+      status: (status: number) => `Request failed (${status}).`,
+      unknown: 'Something went wrong.',
+    },
+
+    search: {
+      location: 'Location',
+      locationPlaceholder: 'Postal code, city or address',
+      radius: 'Radius (m)',
+      category: 'Category',
+      anyCategory: 'Any',
+      textQuery: 'Text query',
+      textQueryPlaceholder: 'Sushi Mura omakase',
+      ratingMin: 'Rating min',
+      ratingMax: 'Rating max',
+      maxReviews: 'Max reviews',
+      submit: 'Search',
+      submitting: 'Searching…',
+      /** Stated up front rather than only after a refusal: the requirement is
+       *  not guessable from a form whose only required field is the location. */
+      note: 'A category or a text query is required — the location says where to look, not what for.',
+      resolved: (place: string) => `Searched around ${place}`,
+      funnel: (searched: number, matched: number) =>
+        `${searched} listings searched · ${matched} matched`,
+      partial: 'Google returned an error partway through — these results are incomplete.',
+      truncated:
+        'Stopped at the result ceiling — Google had more. Narrow the search or raise LEAD_SEARCH_MAX_RESULTS.',
+      empty:
+        'Nothing matched. The rating and review-count limits are applied after Google returns its listings, so a tight cap can empty the list.',
+      merchant: 'Merchant',
+      rating: 'Rating',
+      reviews: 'Reviews',
+      distance: 'Distance',
+      uncategorised: 'Uncategorised',
+      website: 'Website',
+      savedBadge: 'Saved',
+      save: 'Save',
+      saving: 'Saving…',
+      alreadySaved: (name: string) =>
+        `${name} was already saved — the existing row is unchanged.`,
+    },
+
+    saved: {
+      merchant: 'Merchant',
+      status: 'Status',
+      /** Column header over the date a merchant was saved. */
+      savedOn: 'Saved',
+      failed: 'Could not load saved merchants.',
+      failedMore: 'Could not load more saved merchants.',
+      empty: 'Nothing saved yet. Run a search to add one.',
+      loadMore: 'Load more',
+      loadingMore: 'Loading…',
+    },
+
+    copy: {
+      copy: 'Copy',
+      copied: 'Copied',
+      failed: 'Copy failed',
+      /** The label changes on the control just pressed, which a screen reader
+       *  does not re-announce. These are what it hears instead. */
+      copiedAnnouncement: 'Copied to clipboard',
+      failedAnnouncement: 'Copy failed — select the URL and copy it by hand',
+    },
+
+    editor: {
+      back: '← Back',
+      reviews: 'reviews',
+      asOf: (date: string) => `(as of ${date})`,
+      note: 'Google supplies the summary and the attributes. Everything else here is what it cannot know — and together they are the whole of what the AI is told about this merchant.',
+      about: 'About the business',
+      /* Grouped by the question each field answers, because eight textareas in
+       * one column read as a form to get through rather than a description to
+       * write. */
+      offers: {
+        title: 'What it offers',
+        caption: 'This is what makes a review sound like a real visit.',
+      },
+      voice: {
+        title: 'How reviews should read',
+        caption: 'The angles a suggestion is written from, and the words it may use.',
+      },
+      instruction: {
+        title: 'Agent Instruction',
+      },
+      /* A field carries a hint only where one earns its place. Three of these
+       * are the fields Google cannot answer, which is the reason this screen
+       * exists, and their labels already say it. */
+      fields: {
+        businessSummary: {
+          label: 'Business summary',
+          hint: 'What the business is, in two or three specific sentences. Prefilled from Google’s editorial line, or a plain sentence built from the category and city when Google had none.',
+        },
+        products: { label: 'Products' },
+        services: { label: 'Services' },
+        menuItems: { label: 'Menu items' },
+        sellingPoints: {
+          label: 'Selling points',
+          hint: 'What regulars actually praise. Prefilled from Google’s attributes (dine-in, takeout) — those are true of everyone, so replace them with what makes this place different.',
+        },
+        approvedKeywords: {
+          label: 'Approved keywords',
+          hint: 'Words the merchant is happy to see in a review. Offered to the model, never forced into it.',
+        },
+        experienceTopics: {
+          label: 'Experience topics',
+          hint: 'One angle per suggestion, rotating each batch, so three cards read as different reviews. Prefilled from the business category.',
+        },
+        customInstructions: {
+          label: 'Custom instructions',
+          hint: 'Let the agent know about custom rules / style the reviews should adopt. Do not tell the agent to include links, this would break output validation',
+        },
+      },
+      onePerLine: 'One per line',
+      noLinks: 'No links or web addresses',
+      save: 'Save context',
+      saving: 'Saving…',
+      saved: 'Saved',
+      confirmation: 'All eight fields replaced.',
+      loadFailed: 'Could not load this merchant.',
+      saveFailed: 'Could not save.',
+      linkRejected:
+        'Custom instructions cannot contain a link or web address — generated reviews reject URLs, so every suggestion for this merchant would fail.',
+    },
   },
 }
 
