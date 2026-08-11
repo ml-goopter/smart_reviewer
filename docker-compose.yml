@@ -32,6 +32,11 @@ x-api: &api
     # — which is where the documented `pytest` command runs it.
     - ./.env.example:/repo/.env.example:ro
     - ./docker-compose.yml:/repo/docker-compose.yml:ro
+    # The proxy_read_timeout guard globs this directory. Without it the glob
+    # matches nothing inside the container, which is where the documented
+    # `docker compose exec api pytest` runs it — the guard fails outright rather
+    # than passing vacuously, but only on the host does it check anything.
+    - ./nginx:/repo/nginx:ro
 
 services:
   db:
@@ -112,23 +117,31 @@ services:
   # process — it is a directory of files nginx reads. There is no Node runtime
   # to keep alive and nothing for the two to talk to each other about.
   #
-  # This is the production shape. Day-to-day frontend work does not use it:
-  # run `npm run dev` in apps/web and hit :5173, where Vite proxies /api and
-  # /m straight to the published API port.
-  web-nginx:
-    build:
-      # Repo root, so the image can take in both apps/web and nginx/nginx.conf.
-      context: .
-      dockerfile: apps/web/Dockerfile
+  # The stock nginx image plus two mounts, not a built image: the bundle and the
+  # config are both inputs nginx reads at request time, so baking them in bought
+  # only a rebuild between `npm run build` and seeing the result. Deploying the
+  # frontend is `npm run build` in apps/web; nginx serves whatever is in dist on
+  # the next request. Run that build first — Docker creates an empty directory
+  # for a missing bind source, which serves as 404s rather than an error.
+  #
+  # This is also the development shape, on purpose. There is no Vite service and
+  # no dev overlay: the nginx that answers a developer is the nginx that answers
+  # in production, so a route cannot work in one and dead-end in the other. The
+  # price is a build per frontend change and no hot reload.
+  web:
+    image: nginx:1.27-alpine
+    volumes:
+      # Read-only: nginx never writes to either, and the container has no
+      # business modifying the host's build output or its own config.
+      - ./apps/web/dist:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # - ~/goopter.com:/etc/letsencrypt/live/goopter.com:ro
     ports:
       - '8080:80'
-    # volumes:
-      # - ~/goopter.com:/etc/letsencrypt/live/goopter.com:ro
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
-    
 
 volumes:
   pgdata:
