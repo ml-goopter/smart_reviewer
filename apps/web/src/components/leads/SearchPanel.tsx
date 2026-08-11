@@ -46,9 +46,9 @@ type Notice =
   | { kind: 'already-saved'; name: string }
   | { kind: 'will-not-open'; name: string; status: string }
 
-function distance(metres: number | null): string {
+function distance(units: Messages['leads']['search'], metres: number | null): string {
   if (metres === null) return '—'
-  return metres < 1000 ? `${metres} m` : `${(metres / 1000).toFixed(1)} km`
+  return metres < 1000 ? units.metres(metres) : units.kilometres((metres / 1000).toFixed(1))
 }
 
 const DEFAULT_RADIUS_METERS = 5000
@@ -184,7 +184,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
       // alone — so the status is kept and the sentence written here, rather
       // than putting an English line under a Chinese header.
       setNotice(
-        saved.note !== null
+        saved.note != null
           ? {
             kind: 'will-not-open',
             name: saved.merchant.name,
@@ -415,7 +415,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
                 {/* "0" would assert a fact Google marked unknown, and the
                     review-count cap is the filter this tool turns on. */}
                 <td>{result.reviewCount ?? '—'}</td>
-                <td>{distance(result.distanceMeters)}</td>
+                <td>{distance(t, result.distanceMeters)}</td>
                 <td className="lead-actions">
                   {result.saved ? (
                     <>

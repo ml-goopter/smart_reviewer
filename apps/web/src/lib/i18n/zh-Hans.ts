@@ -167,6 +167,10 @@ export const zhHans: Messages = {
       rating: '评分',
       reviews: '评价数',
       distance: '距离',
+      /** The cell under it. A row of "1.2 km" under 距離 is the one place the
+       *  table was still half-English. */
+      metres: (value: number) => `${value} 米`,
+      kilometres: (value: string) => `${value} 公里`,
       uncategorised: '未分类',
       website: '网站',
       savedBadge: '已保存',

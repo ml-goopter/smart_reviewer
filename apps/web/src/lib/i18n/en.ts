@@ -217,6 +217,10 @@ export const en = {
       rating: 'Rating',
       reviews: 'Reviews',
       distance: 'Distance',
+      /** The cell under it. A row of "1.2 km" under 距離 is the one place the
+       *  table was still half-English. */
+      metres: (value: number) => `${value} m`,
+      kilometres: (value: string) => `${value} km`,
       uncategorised: 'Uncategorised',
       website: 'Website',
       savedBadge: 'Saved',

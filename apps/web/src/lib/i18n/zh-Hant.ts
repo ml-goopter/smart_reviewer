@@ -169,6 +169,10 @@ export const zhHant: Messages = {
       rating: '評分',
       reviews: '評論數',
       distance: '距離',
+      /** The cell under it. A row of "1.2 km" under 距離 is the one place the
+       *  table was still half-English. */
+      metres: (value: number) => `${value} 公尺`,
+      kilometres: (value: string) => `${value} 公里`,
       uncategorised: '未分類',
       website: '網站',
       savedBadge: '已儲存',
