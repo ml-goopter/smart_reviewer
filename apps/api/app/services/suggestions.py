@@ -18,9 +18,11 @@ from app.config import get_settings
 from app.errors import ApiError
 from app.models import (
     DEFAULT_LANGUAGE,
+    LANGUAGES,
     Merchant,
     MerchantReviewContext,
     SmartReviewSession,
+    SmartReviewSessionLanguage,
     SmartReviewSuggestion,
 )
 from app.providers.base import ProviderError, SuggestionProvider
@@ -374,6 +376,42 @@ def _previous_texts(
             .order_by(SmartReviewSuggestion.created_at)
         ).all()
     )
+
+
+def capped_languages(db: Session, session: SmartReviewSession) -> list[str]:
+    """The languages this session has no generations left in.
+
+    Read from the same counter the cap is claimed against. The browser cannot
+    know the cap, so without this it learns the limit only from a request that
+    fails — which is one press too late: the batch that spends the last slot
+    succeeds, and Generate More stays on screen until the press after it.
+
+    Counts claims, not delivered batches — the cap is claimed and committed
+    before the provider is called, so a generation still in flight already
+    reads as spent, and a concurrent caller is told so. If that generation then
+    fails its slot is refunded and this answer was briefly pessimistic. That is
+    the safe direction: the alternative is offering a slot that another request
+    is holding. The client recovers on the next load.
+
+    The session-wide attempt ceiling is deliberately not folded in. It counts
+    refunded failures too, so reporting it here would retire the button for a
+    customer who has hit nothing but a flaky provider and still has real
+    allowance left.
+    """
+    cap = get_settings().max_generations_per_language
+
+    counts = dict(
+        db.execute(
+            select(
+                SmartReviewSessionLanguage.language,
+                SmartReviewSessionLanguage.generation_count,
+            ).where(SmartReviewSessionLanguage.session_id == session.id)
+        ).all()
+    )
+
+    # A language with no row has generated nothing. It is still capped when the
+    # cap is zero, which is a legitimate setting — see _CLAIM_GENERATION.
+    return [language for language in LANGUAGES if counts.get(language, 0) >= cap]
 
 
 def generate(

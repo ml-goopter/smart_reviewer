@@ -109,11 +109,15 @@ class Api:
             "select_suggestion": [],
             "complete_session": [],
             "generate": [],
+            "capped_languages": [],
         }
 
         self.on_create_session: object = FakeSession()
         self.on_load_valid_session: object = FakeSession()
         self.on_generate: object = []
+        # Which languages the service says are spent. Empty is the ordinary
+        # case; a test that cares about the cap sets it.
+        self.on_capped_languages: list[str] = []
 
     def _resolve(self, name: str, args, result):
         self.calls[name].append(args)
@@ -151,6 +155,14 @@ class Api:
             "generate", (session, provider, language), self.on_generate
         )
 
+    def capped_languages(self, _db, session):
+        # The commit count at call time, so a test can pin that the routes read
+        # this inside the transaction they already have rather than opening a
+        # second one to answer with.
+        return self._resolve(
+            "capped_languages", (session, self.db.commits), self.on_capped_languages
+        )
+
     # --- convenience -------------------------------------------------------
 
     on_select_suggestion: object = None
@@ -176,6 +188,9 @@ def api(monkeypatch):
                  "select_suggestion", "complete_session"):
         monkeypatch.setattr(session_service, name, getattr(harness, name))
     monkeypatch.setattr(suggestion_service, "generate", harness.generate)
+    monkeypatch.setattr(
+        suggestion_service, "capped_languages", harness.capped_languages
+    )
 
     app.dependency_overrides[get_db] = lambda: db
     # Never a real client: a test must not make a paid, non-deterministic call.

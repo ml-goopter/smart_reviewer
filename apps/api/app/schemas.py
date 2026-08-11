@@ -78,6 +78,10 @@ class SessionResponse(BaseModel):
     merchant: PublicMerchant
     session: PublicSession
     suggestions: list[PublicSuggestion]
+    # Which languages are already out of generations. A session survives a
+    # reload and a trip to Google, so the browser cannot track this itself: it
+    # would start every load believing the full allowance was still there.
+    capped_languages: list[str] = Field(serialization_alias="cappedLanguages")
     # Returned here so that continuing to Google never waits on a network
     # round-trip. The browser holds a server-chosen value; it never supplies one.
     google_review_url: str = Field(serialization_alias="googleReviewUrl")
@@ -85,6 +89,11 @@ class SessionResponse(BaseModel):
 
 class GenerateSuggestionsResponse(BaseModel):
     suggestions: list[PublicSuggestion]
+    # Whether this language's allowance is spent *counting this batch*. The cap
+    # is server-side state, so the browser can only otherwise discover it from
+    # a request that fails — leaving Generate More on screen for one press more
+    # than can be honoured.
+    cap_reached: bool = Field(serialization_alias="capReached")
 
 
 class SelectSuggestionRequest(BaseModel):
