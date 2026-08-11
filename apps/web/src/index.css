@@ -625,6 +625,23 @@ body {
   height: 22px;
 }
 
+/* The two glyphs of the translate mark. Lengths inside the svg are user units
+ * on a 24 viewBox, not device pixels — 13 here draws at 22 × 13/24 ≈ 12px.
+ *
+ * The CJK glyph takes --cjk like every other Chinese character in the app, so
+ * it is drawn in PingFang TC rather than SC once :lang(zh-Hant) matches. */
+.menu__han {
+  font-family: var(--cjk);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.menu__latin {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .scrim {
   position: fixed;
   inset: 0;

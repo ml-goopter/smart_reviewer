@@ -21,6 +21,7 @@
     --rv-display:"Avenir Next","Segoe UI",system-ui,-apple-system,sans-serif;
     --rv-body:"Avenir Next","Segoe UI",system-ui,-apple-system,sans-serif;
     --rv-label:var(--mono);
+    --rv-cjk:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC","Source Han Sans SC";
     --rv-radius:14px; --rv-btnr:11px;
   }
   @media (prefers-color-scheme:dark){
@@ -89,6 +90,9 @@
   .rv-menu:hover{color:var(--rv-accent)}
   .rv-menu:focus-visible{outline:2px solid var(--rv-accent); outline-offset:2px; border-radius:7px}
   .rv-menu svg{width:22px; height:22px}
+  /* the 文/A translate mark: user units on a 24 viewBox, not device px */
+  .rv-han{font-family:var(--rv-cjk); font-size:13px; font-weight:500}
+  .rv-latin{font-family:var(--rv-display); font-size:13px; font-weight:700}
 
   /* slide-in drawer (scoped to each phone) */
   .rv-scrim{position:absolute; inset:0; background:rgba(12,24,18,.42); opacity:0; visibility:hidden; transition:opacity .25s ease; z-index:30}
@@ -203,7 +207,7 @@
           <div class="rv-topbar">
             <span class="rv-wordmark">Goopter</span>
             <button class="rv-menu" type="button" aria-label="Menu" aria-haspopup="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><text class="rv-han" x="7" y="12" text-anchor="middle">文</text><text class="rv-latin" x="17.5" y="22.5" text-anchor="middle">A</text></svg>
             </button>
           </div>
           <div class="rv-head">
@@ -247,7 +251,7 @@
           <div class="rv-topbar">
             <span class="rv-wordmark">Goopter</span>
             <button class="rv-menu" type="button" aria-label="Menu" aria-haspopup="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><text class="rv-han" x="7" y="12" text-anchor="middle">文</text><text class="rv-latin" x="17.5" y="22.5" text-anchor="middle">A</text></svg>
             </button>
           </div>
           <hr class="rv-divider">
