@@ -32,6 +32,11 @@ x-api: &api
     # — which is where the documented `pytest` command runs it.
     - ./.env.example:/repo/.env.example:ro
     - ./docker-compose.yml:/repo/docker-compose.yml:ro
+    # The proxy_read_timeout guard globs this directory. Without it the glob
+    # matches nothing inside the container, which is where the documented
+    # `docker compose exec api pytest` runs it — the guard fails outright rather
+    # than passing vacuously, but only on the host does it check anything.
+    - ./nginx:/repo/nginx:ro
 
 services:
   db:
