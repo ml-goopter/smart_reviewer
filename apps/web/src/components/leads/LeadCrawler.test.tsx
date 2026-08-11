@@ -1,10 +1,21 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render as renderBare, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ReactElement } from 'react'
+
+import { LocaleProvider } from '../../lib/i18n/context'
 
 import { ContextEditor } from './ContextEditor'
 import { CopyButton } from './CopyButton'
 import { LeadCrawler } from './LeadCrawler'
 import type { LeadSearchResponse } from '../../lib/leadTypes'
+
+/* Every screen here reads the catalogue, so every render needs the provider.
+ * Pinned to English: these tests assert the English wording, and the drawer's
+ * own behaviour is TopBar.test.tsx's subject. `localised.test.tsx` is what
+ * proves the crawler holds no literal. */
+function render(element: ReactElement) {
+  return renderBare(<LocaleProvider initial="en">{element}</LocaleProvider>)
+}
 
 /* The parts of the crawler that are easy to get wrong and invisible to a type
  * check: the funnel that keeps a short list legible, the criteria that must not
@@ -781,7 +792,10 @@ describe('the context editor', () => {
 
     const field = screen.getByLabelText('Custom instructions')
     const hint = document.getElementById(field.getAttribute('aria-describedby')!)
-    expect(hint!.textContent).toMatch(/No links/)
+    // A link here fails output validation for every suggestion this merchant
+    // ever generates, so the hint has to say so before it is typed.
+    expect(hint!.textContent).toMatch(/links/)
+    expect(hint!.textContent).toMatch(/validation/)
   })
 
   it('shows the snapshot date beside the rating', async () => {
