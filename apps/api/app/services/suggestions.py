@@ -88,6 +88,10 @@ _URL = re.compile(
     re.I | re.X,
 )
 
+# Trailing full stop, ASCII or full-width. Repeated, so "Loved it..." does not
+# become "Loved it..". Question and exclamation marks are left alone.
+_FINAL_STOP = re.compile(r"[.。．]+\s*$")
+
 # Zero-width and bidirectional-override characters. They pad the length check
 # without adding anything a reader can see, and an RTL override can reorder how
 # the text renders on Google.
@@ -342,6 +346,12 @@ def normalise(candidate: str) -> str:
     return re.sub(r"\s+", " ", _INVISIBLE.sub("", folded)).strip()
 
 
+def strip_final_stop(candidate: str) -> str:
+    """Drop the closing period. Applied before validation, so the length rule
+    measures the text that is actually stored."""
+    return _FINAL_STOP.sub("", candidate.strip())
+
+
 def validate(candidate: str) -> bool:
     settings = get_settings()
     text_value = normalise(candidate)
@@ -583,8 +593,9 @@ def _attempt(
 
     # Zip against topics so a suggestion keeps the angle it was asked for even
     # when an earlier one in the batch was dropped.
-    return [
-        Draft(text=candidate, topic=topic)
-        for candidate, topic in zip(candidates, topics, strict=False)
-        if validate(candidate)
-    ]
+    drafts = []
+    for candidate, topic in zip(candidates, topics, strict=False):
+        text_value = strip_final_stop(candidate)
+        if validate(text_value):
+            drafts.append(Draft(text=text_value, topic=topic))
+    return drafts

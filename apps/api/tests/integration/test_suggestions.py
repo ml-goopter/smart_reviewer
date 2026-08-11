@@ -16,6 +16,7 @@ from app.services.suggestions import (
     DEFAULT_TOPICS,
     build_prompt,
     parse_batch,
+    strip_final_stop,
     topics_for_generation,
     validate,
 )
@@ -27,6 +28,9 @@ GOOD = [
     "Staff were friendly without hovering, and they refilled water unprompted.",
     "Plain room but comfortable, and it stayed quiet enough to talk over lunch.",
 ]
+
+# What the customer is shown: the model's text with its closing period gone.
+STORED = [strip_final_stop(text) for text in GOOD]
 
 
 class StubProvider:
@@ -138,6 +142,22 @@ def test_ordinary_review_text_is_accepted():
     assert validate(GOOD[0]) is True
 
 
+@pytest.mark.parametrize(
+    ("candidate", "expected"),
+    [
+        ("Great bowl of noodles.", "Great bowl of noodles"),
+        ("Great bowl of noodles. ", "Great bowl of noodles"),
+        ("Loved it...", "Loved it"),
+        ("麵很好吃。", "麵很好吃"),
+        ("Would I go back? Yes!", "Would I go back? Yes!"),
+        ("Open 9 a.m. to 5 p.m", "Open 9 a.m. to 5 p.m"),
+        ("Great bowl of noodles", "Great bowl of noodles"),
+    ],
+)
+def test_final_period_is_dropped(candidate, expected):
+    assert strip_final_stop(candidate) == expected
+
+
 # --- parsing --------------------------------------------------------------
 
 
@@ -201,7 +221,7 @@ def test_generate_returns_201_with_three_suggestions(api, merchant):
     response = api.post(f"{CREATE}/{token}/suggestions")
 
     assert response.status_code == 201
-    assert [item["text"] for item in response.json()["suggestions"]] == GOOD
+    assert [item["text"] for item in response.json()["suggestions"]] == STORED
 
 
 def test_generated_rows_record_provider_topic_and_generation(api, merchant, db):
@@ -215,6 +235,7 @@ def test_generated_rows_record_provider_topic_and_generation(api, merchant, db):
     assert [row.position for row in rows] == [1, 2, 3]
     assert [row.topic for row in rows] == ["food", "service", "atmosphere"]
     assert all(row.model_provider == "stub" for row in rows)
+    assert all(not row.text_.endswith(".") for row in rows)
     assert all(row.generation_number == 1 for row in rows)
 
 
@@ -318,7 +339,7 @@ def test_later_generations_avoid_earlier_text(api, merchant, provider):
     api.post(f"{CREATE}/{token}/suggestions")
 
     second_prompt = provider.calls[1][1]
-    for earlier in GOOD:
+    for earlier in STORED:
         assert earlier in second_prompt
 
 

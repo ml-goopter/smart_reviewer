@@ -19,7 +19,8 @@ from app.models import (
     SmartReviewSuggestion,
 )
 from app.routers.review import get_provider
-from tests.integration.test_suggestions import GOOD, StubProvider
+from app.services.suggestions import strip_final_stop
+from tests.integration.test_suggestions import GOOD, STORED, StubProvider
 
 CREATE = "/api/review/sessions"
 
@@ -28,6 +29,9 @@ CHINESE = [
     "店員親切但不會一直來打擾，水也會主動幫忙加。",
     "店面樸實但坐起來舒服，中午還算安靜，可以好好聊天。",
 ]
+
+# The full-width stop is dropped like the ASCII one.
+CHINESE_STORED = [strip_final_stop(text) for text in CHINESE]
 
 
 @pytest.fixture
@@ -139,8 +143,8 @@ def test_a_session_returns_every_language_tagged(api, merchant, provider):
         by_language.setdefault(item["language"], []).append(item["text"])
 
     assert set(by_language) == {"en", "zh-Hant"}
-    assert by_language["en"] == GOOD
-    assert by_language["zh-Hant"] == CHINESE
+    assert by_language["en"] == STORED
+    assert by_language["zh-Hant"] == CHINESE_STORED
 
 
 def test_the_avoid_list_does_not_cross_languages(api, merchant, provider):

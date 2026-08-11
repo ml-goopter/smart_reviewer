@@ -372,6 +372,7 @@ Best-effort only.
 Rules:
 
 * up to 3 suggestions per batch (only those that validate are stored — DECISIONS.md R11)
+* the closing period is stripped before validation, ASCII `.` or full-width `。`
 * 20–500 chars
 * no HTML
 * no URLs unless allowed
