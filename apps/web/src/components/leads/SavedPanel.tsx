@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { useLocale, useMessages } from '../../lib/i18n/context'
 import { fetchSaved } from '../../lib/leadsApi'
 import type { SavedMerchant } from '../../lib/leadTypes'
 import { CopyButton } from './CopyButton'
 
-function day(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
+/** Formatted for the language on screen rather than for the machine: the
+ *  column heading beside it is translated, and the two disagreeing reads as a
+ *  screen half-swapped. */
+function day(iso: string, locale: string): string {
+  return new Date(iso).toLocaleDateString(locale, {
     day: '2-digit',
     month: 'short',
   })
@@ -31,6 +35,10 @@ function append(
  *  without it, a URL not pasted in the moment is recoverable only by paying to
  *  find the same listing again. */
 export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void }) {
+  const leads = useMessages().leads
+  const t = leads.saved
+  const { locale } = useLocale()
+
   const [merchants, setMerchants] = useState<SavedMerchant[] | null>(null)
   const [error, setError] = useState(false)
   const [more, setMore] = useState(false)
@@ -85,15 +93,15 @@ export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void })
   if (error && merchants === null) {
     return (
       <p className="lead-error" role="alert">
-        Could not load saved merchants.
+        {t.failed}
       </p>
     )
   }
-  if (merchants === null) return <p className="lead-empty">Loading…</p>
+  if (merchants === null) return <p className="lead-empty">{leads.loading}</p>
   if (merchants.length === 0) {
     return (
       <p className="lead-empty" role="status">
-        Nothing saved yet. Run a search to add one.
+        {t.empty}
       </p>
     )
   }
@@ -103,9 +111,9 @@ export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void })
       <table className="lead-table">
         <thead>
           <tr>
-            <th>Merchant</th>
-            <th>Status</th>
-            <th>Saved</th>
+            <th>{t.merchant}</th>
+            <th>{t.status}</th>
+            <th>{t.savedOn}</th>
             <th />
           </tr>
         </thead>
@@ -119,19 +127,19 @@ export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void })
                 </span>
               </td>
               <td>{merchant.status}</td>
-              <td>{day(merchant.createdAt)}</td>
+              <td>{day(merchant.createdAt, locale)}</td>
               <td className="lead-actions">
                 {merchant.url === null ? (
-                  <span className="lead-sub">no URL</span>
+                  <span className="lead-sub">{leads.noUrl}</span>
                 ) : (
-                  <CopyButton url={merchant.url} label="Copy URL" />
+                  <CopyButton url={merchant.url} label={leads.copyUrl} />
                 )}
                 <button
                   type="button"
                   className="lead-btn lead-btn--quiet"
                   onClick={() => onEdit(merchant.id)}
                 >
-                  Edit
+                  {leads.edit}
                 </button>
               </td>
             </tr>
@@ -143,7 +151,7 @@ export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void })
           button below is the retry. */}
       {error && (
         <p className="lead-error" role="alert">
-          Could not load more saved merchants.
+          {t.failedMore}
         </p>
       )}
 
@@ -157,7 +165,7 @@ export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void })
           disabled={loading}
           onClick={() => load(merchants.length)}
         >
-          {loading ? 'Loading…' : 'Load more'}
+          {loading ? t.loadingMore : t.loadMore}
         </button>
       )}
     </>

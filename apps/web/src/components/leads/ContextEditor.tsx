@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 
+import { useLocale, useMessages } from '../../lib/i18n/context'
 import { LeadFailure, fetchContext, putContext } from '../../lib/leadsApi'
 import type { MerchantContext, ReviewContext } from '../../lib/leadTypes'
+import { TopBar } from '../TopBar'
 import { CopyButton } from './CopyButton'
 
 /** What the eight textareas hold: raw text, exactly as typed.
@@ -25,54 +27,13 @@ const EMPTY: FormText = {
 }
 
 /* Grouped by the question each field answers, because eight textareas in one
- * column read as a form to get through rather than a description to write. */
+ * column read as a form to get through rather than a description to write.
+ *
+ * Only the grouping lives here now. Every word the operator reads comes from
+ * the catalogue, keyed by the same field names the form itself uses. */
 const SECTIONS = [
-  {
-    title: 'What it offers',
-    caption: 'None of this is in Google. It is what makes a review sound like a real visit.',
-    fields: ['products', 'services', 'menuItems'],
-  },
-  {
-    title: 'How reviews should read',
-    caption: 'The angles a suggestion is written from, and the words it may use.',
-    fields: ['sellingPoints', 'approvedKeywords', 'experienceTopics'],
-  },
-] as const
-
-/* Every field here is fed to the model, so each hint says two things: what
- * belongs in it, and whether Google prefilled it. The three Google cannot
- * answer are the reason this screen exists. */
-const LISTS = [
-  [
-    'products',
-    'Products',
-    'What customers buy, in their words — “beef pho”, “Vietnamese coffee”. Google has no field for this.',
-  ],
-  [
-    'services',
-    'Services',
-    'What you do rather than sell — “catering”, “walk-ins welcome”. Google has no field for this.',
-  ],
-  [
-    'menuItems',
-    'Menu items',
-    'Named dishes a reviewer might single out. Google has no field for this.',
-  ],
-  [
-    'sellingPoints',
-    'Selling points',
-    'What regulars actually praise. Prefilled from Google’s attributes (dine-in, takeout) — those are true of everyone, so replace them with what makes this place different.',
-  ],
-  [
-    'approvedKeywords',
-    'Approved keywords',
-    'Words the merchant is happy to see in a review. Offered to the model, never forced into it.',
-  ],
-  [
-    'experienceTopics',
-    'Experience topics',
-    'One angle per suggestion, rotating each batch, so three cards read as different reviews. Prefilled from the business category.',
-  ],
+  { key: 'offers', fields: ['products', 'services', 'menuItems'] },
+  { key: 'voice', fields: ['sellingPoints', 'approvedKeywords', 'experienceTopics'] },
 ] as const
 
 /** One entry per line, both ways. A comma-separated box would make "fish, chips
@@ -124,18 +85,23 @@ function Field({
 }: {
   name: string
   label: string
-  hint: string
-  children: (id: string, describedBy: string) => React.ReactNode
+  /** Absent for the fields whose label says it all. Nothing is rendered then,
+   *  and `aria-describedby` is left off rather than pointing at an empty
+   *  element — a dangling reference is announced as nothing at all. */
+  hint?: string
+  children: (id: string, describedBy: string | undefined) => React.ReactNode
 }) {
   const id = `lead-${name}`
-  const describedBy = `${id}-hint`
+  const describedBy = hint === undefined ? undefined : `${id}-hint`
 
   return (
     <div className="lead-field">
       <label htmlFor={id}>{label}</label>
-      <span className="lead-hint" id={describedBy}>
-        {hint}
-      </span>
+      {describedBy !== undefined && (
+        <span className="lead-hint" id={describedBy}>
+          {hint}
+        </span>
+      )}
       {children(id, describedBy)}
     </div>
   )
@@ -148,10 +114,20 @@ export function ContextEditor({
   merchantId: string
   onBack: () => void
 }) {
+  const leads = useMessages().leads
+  const t = leads.editor
+  // A date under a Chinese header should not be formatted for whatever the
+  // machine happens to be set to.
+  const { locale } = useLocale()
+
   const [loaded, setLoaded] = useState<MerchantContext | null>(null)
   const [form, setForm] = useState<FormText>(EMPTY)
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
-  const [error, setError] = useState<string | null>(null)
+  /* Which failure, not its wording. A rendered sentence would still be sitting
+   * there in the old language after the drawer changes it — and the effect
+   * below must not depend on the catalogue, or every language change would
+   * refetch the merchant. */
+  const [error, setError] = useState<'load' | 'save' | 'link' | null>(null)
 
   useEffect(() => {
     fetchContext(merchantId)
@@ -159,7 +135,7 @@ export function ContextEditor({
         setLoaded(body)
         setForm(textFrom(body.context))
       })
-      .catch(() => setError('Could not load this merchant.'))
+      .catch(() => setError('load'))
   }, [merchantId])
 
   /** Any edit un-says "Saved". Leaving the confirmation up over changed text
@@ -180,11 +156,20 @@ export function ContextEditor({
       setStatus('idle')
       setError(
         failure instanceof LeadFailure && failure.code === 'instructions_contain_url'
-          ? 'Custom instructions cannot contain a link or web address — generated reviews reject URLs, so every suggestion for this merchant would fail.'
-          : 'Could not save.',
+          ? 'link'
+          : 'save',
       )
     }
   }
+
+  const wording =
+    error === null
+      ? null
+      : error === 'load'
+        ? t.loadFailed
+        : error === 'link'
+          ? t.linkRejected
+          : t.saveFailed
 
   // `.leads` is the page frame — max width, gutters, type. The editor is its
   // own route, so it has to carry the frame itself; without it the form runs
@@ -192,8 +177,9 @@ export function ContextEditor({
   if (error !== null && loaded === null) {
     return (
       <div className="leads">
+        <TopBar />
         <p className="lead-error" role="alert">
-          {error}
+          {wording}
         </p>
       </div>
     )
@@ -201,19 +187,23 @@ export function ContextEditor({
   if (loaded === null) {
     return (
       <div className="leads">
-        <p className="lead-empty">Loading…</p>
+        <TopBar />
+        <p className="lead-empty">{leads.loading}</p>
       </div>
     )
   }
 
   return (
     <div className="leads lead-panel">
+      {/* Its own route, so it carries the bar itself — the crawler shell that
+        * mounts one is not above this. */}
+      <TopBar />
       <button
         type="button"
         className="lead-btn lead-btn--quiet lead-back"
         onClick={onBack}
       >
-        ← Back
+        {t.back}
       </button>
 
       <div className="lead-card">
@@ -224,11 +214,13 @@ export function ContextEditor({
             <>
               {' · '}
               {loaded.merchant.googleRating} ★ · {loaded.merchant.googleReviewCount}{' '}
-              reviews
+              {t.reviews}
               {loaded.merchant.googleSyncedAt !== null && (
                 <>
                   {' '}
-                  (as of {new Date(loaded.merchant.googleSyncedAt).toLocaleDateString()})
+                  {t.asOf(
+                    new Date(loaded.merchant.googleSyncedAt).toLocaleDateString(locale),
+                  )}
                 </>
               )}
             </>
@@ -241,20 +233,16 @@ export function ContextEditor({
         )}
       </div>
 
-      <p className="lead-note">
-        Google supplies the summary and the attributes. Everything else here is
-        what it cannot know — and together they are the whole of what the AI is
-        told about this merchant.
-      </p>
+      <p className="lead-note">{t.note}</p>
 
       <form className="lead-editor" onSubmit={submit}>
         <section className="lead-section">
-          <h3>About the business</h3>
+          <h3>{t.about}</h3>
 
           <Field
             name="businessSummary"
-            label="Business summary"
-            hint="What the business is, in two or three specific sentences. Prefilled from Google’s editorial line, or a plain sentence built from the category and city when Google had none."
+            label={t.fields.businessSummary.label}
+            hint={t.fields.businessSummary.hint}
           >
             {(id, describedBy) => (
               <textarea
@@ -269,15 +257,20 @@ export function ContextEditor({
         </section>
 
         {SECTIONS.map((section) => (
-          <section className="lead-section" key={section.title}>
-            <h3>{section.title}</h3>
-            <p className="lead-caption">{section.caption}</p>
+          <section className="lead-section" key={section.key}>
+            <h3>{t[section.key].title}</h3>
+            <p className="lead-caption">{t[section.key].caption}</p>
 
             <div className="lead-grid">
               {section.fields.map((key) => {
-                const [, label, hint] = LISTS.find(([name]) => name === key)!
+                const field = t.fields[key]
                 return (
-                  <Field key={key} name={key} label={label} hint={hint}>
+                  <Field
+                    key={key}
+                    name={key}
+                    label={field.label}
+                    {...('hint' in field ? { hint: field.hint } : {})}
+                  >
                     {(id, describedBy) => (
                       <textarea
                         id={id}
@@ -285,7 +278,7 @@ export function ContextEditor({
                         // Six: Google supplies up to eight attributes, and the
                         // prefilled selling points should not open scrolled.
                         rows={6}
-                        placeholder="One per line"
+                        placeholder={t.onePerLine}
                         value={form[key]}
                         onChange={(event) => edit(key, event.target.value)}
                       />
@@ -298,19 +291,19 @@ export function ContextEditor({
         ))}
 
         <section className="lead-section">
-          <h3>House rules</h3>
+          <h3>{t.instruction.title}</h3>
 
           <Field
             name="customInstructions"
-            label="Custom instructions"
-            hint="House style, not facts — “keep it under three sentences”, “say clinic, not shop”. No links: generated text containing a URL fails validation, so one here would break every suggestion for this merchant."
+            label={t.fields.customInstructions.label}
+            hint={t.fields.customInstructions.hint}
           >
             {(id, describedBy) => (
               <textarea
                 id={id}
                 aria-describedby={describedBy}
                 rows={3}
-                placeholder="No links or web addresses"
+                placeholder={t.noLinks}
                 value={form.customInstructions}
                 onChange={(event) => edit('customInstructions', event.target.value)}
               />
@@ -322,17 +315,17 @@ export function ContextEditor({
             arrives in the same commit as its first text is usually not
             announced at all. */}
         <div role="status" aria-live="polite">
-          {error !== null && <p className="lead-error">{error}</p>}
+          {wording !== null && <p className="lead-error">{wording}</p>}
         </div>
 
         {/* Sticky: the form is now taller than a viewport, and a save button
             that scrolled away would make a long edit feel unsaveable. */}
         <div className="lead-actions-bar">
           <button type="submit" className="lead-btn" disabled={status === 'saving'}>
-            {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved' : 'Save context'}
+            {status === 'saving' ? t.saving : status === 'saved' ? t.saved : t.save}
           </button>
           <span className="lead-sub" role="status" aria-live="polite">
-            {status === 'saved' ? 'All eight fields replaced.' : ''}
+            {status === 'saved' ? t.confirmation : ''}
           </span>
         </div>
       </form>

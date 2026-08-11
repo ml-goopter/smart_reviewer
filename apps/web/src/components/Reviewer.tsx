@@ -4,7 +4,7 @@ import { ApiFailure, completeSession, generateSuggestions, loadSession, selectSu
 import { clearDraft, loadDraft, saveDraft } from '../lib/draft'
 import { useFocusOnMount } from '../lib/a11y'
 import { useLocale, useMessages } from '../lib/i18n/context'
-import type { Locale } from '../lib/i18n'
+import type { Locale, Messages } from '../lib/i18n'
 import type { FailureKind, Session, Suggestion } from '../lib/types'
 import { ErrorState, LoadingState, UnavailableState } from './states'
 import { GenerationNotice, SuggestionCard, SuggestionSkeletons } from './SuggestionList'
@@ -16,6 +16,14 @@ type Phase =
   | { name: 'ready'; session: Session }
   | { name: 'gone' }
   | { name: 'error' }
+
+/** The words the cap notice will show. Announcements reuse them rather than
+ *  wording the same state twice, and make the same empty-or-not choice
+ *  GenerationNotice makes. Only sound for the language on screen — the notice
+ *  is rendered from that, not from whichever language a request named. */
+function capWording(messages: Messages, hasSuggestions: boolean): string {
+  return hasSuggestions ? messages.notice.capReached : messages.notice.capReachedEmpty
+}
 
 export function Reviewer({ token }: { token: string }) {
   const messages = useMessages()
@@ -78,6 +86,14 @@ export function Reviewer({ token }: { token: string }) {
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
+  /** Idempotent: the same language can be reported spent by the batch that
+   *  spent it and again by any request that races past it. */
+  const capLanguage = useCallback((language: Locale) => {
+    setCappedLanguages((current) =>
+      current.includes(language) ? current : [...current, language],
+    )
+  }, [])
+
   const generate = useCallback(async () => {
     if (generatingRef.current) return
     generatingRef.current = true
@@ -97,6 +113,12 @@ export function Reviewer({ token }: { token: string }) {
         (item) => item.language === language,
       )
 
+      // Retired on the batch that spends the last slot, not on the failure
+      // after it. The server is the only thing that knows the cap, so a
+      // success that reports one is the earliest this can be known — before
+      // this, the button survived one press it could never honour.
+      if (batch.capReached) capLanguage(language)
+
       // Appended, never replaced. A customer who liked the second card and
       // pressed Generate More could otherwise never get it back, and at the
       // cap would be stuck with whichever batch happened to be last. New cards
@@ -107,7 +129,20 @@ export function Reviewer({ token }: { token: string }) {
       const added = batch.suggestions.length
 
       const { announce } = messagesRef.current
-      setAnnouncement(isFirst ? announce.ready(added) : announce.added(added))
+
+      // The cap is said as well as shown, and instead of the card count: it
+      // retires Generate More on a *successful* batch, so it is the change
+      // somebody who cannot see the screen most needs told. Only when the
+      // batch's language is still the one on screen — the notice is worded
+      // from the screen, and a cap announced for a language the customer has
+      // since left matches nothing they can read.
+      setAnnouncement(
+        batch.capReached && language === localeRef.current
+          ? capWording(messagesRef.current, added > 0 || !isFirst)
+          : isFirst
+            ? announce.ready(added)
+            : announce.added(added),
+      )
     } catch (error) {
       const kind = error instanceof ApiFailure ? error.kind : 'server'
 
@@ -116,19 +151,27 @@ export function Reviewer({ token }: { token: string }) {
       if (kind === 'session-gone') {
         setPhase({ name: 'gone' })
       } else {
-        if (kind === 'rate-limited') {
-          setCappedLanguages((current) =>
-            current.includes(language) ? current : [...current, language],
-          )
-        }
+        // Still needed with the flag above: the session-wide attempt ceiling
+        // and a cap spent in another tab both surface only as a 429.
+        if (kind === 'rate-limited') capLanguage(language)
         setGenFailure(kind)
-        setAnnouncement(messagesRef.current.announce.generateFailed)
+        // A cap is not a failure, and the notice does not word it as one. What
+        // is heard has to match what is read, or the customer is told to try
+        // again by a screen that offers no way to.
+        setAnnouncement(
+          kind === 'rate-limited' && language === localeRef.current
+            ? capWording(
+                messagesRef.current,
+                suggestionsRef.current.some((item) => item.language === language),
+              )
+            : messagesRef.current.announce.generateFailed,
+        )
       }
     } finally {
       generatingRef.current = false
       setGenerating(false)
     }
-  }, [token])
+  }, [token, capLanguage])
 
   useEffect(() => {
     let live = true
@@ -140,6 +183,10 @@ export function Reviewer({ token }: { token: string }) {
 
         setPhase({ name: 'ready', session })
         setSuggestions(session.suggestions)
+        // The allowance is session state, not tab state: it survives a reload
+        // and the trip to Google. Starting from what the server reports is the
+        // only way a returning customer is not offered a spent generation.
+        setCappedLanguages(session.cappedLanguages)
 
         // Restored before anything is generated: a customer returning from
         // Google already has a review, and spending a cap slot to regenerate
@@ -197,10 +244,14 @@ export function Reviewer({ token }: { token: string }) {
     if (editing) return
     if (requestedRef.current.has(locale)) return
     if (suggestionsRef.current.some((item) => item.language === locale)) return
+    // A spent language has nothing to ask for. Without this the automatic
+    // request is doomed rather than merely the button — reachable whenever the
+    // cap is zero, which turns generation off and is a supported setting.
+    if (cappedLanguages.includes(locale)) return
 
     requestedRef.current.add(locale)
     void generate()
-  }, [phase.name, locale, editing, generate])
+  }, [phase.name, locale, editing, generate, cappedLanguages])
 
   // Persisted on every edit rather than on leave: `pagehide` is unreliable on
   // iOS, and this is the state the whole back-button guarantee rests on.
@@ -414,6 +465,8 @@ function Suggestions({
   const heading = useFocusOnMount<HTMLHeadingElement>()
   const messages = useMessages()
 
+  const notice: FailureKind | null = capReached ? 'rate-limited' : genFailure
+
   return (
     <>
       <TopBar />
@@ -434,9 +487,16 @@ function Suggestions({
         <p className="lead">{messages.suggestions.lead}</p>
       </div>
 
-      {genFailure !== null && (
+      {/* The cap shows itself, rather than waiting for a request to fail on
+        * it — and it outranks a failure, because it is the only one of the two
+        * that is terminal. The notice offers Try again for every other kind,
+        * so letting an outage win the wording here would hand back exactly the
+        * doomed press this path exists to remove. `genFailure` is not
+        * per-language, so it can also belong to a language no longer on
+        * screen. */}
+      {notice !== null && (
         <GenerationNotice
-          kind={genFailure}
+          kind={notice}
           hasSuggestions={suggestions.length > 0}
           onRetry={onGenerate}
           onSkip={onSkip}
@@ -449,7 +509,10 @@ function Suggestions({
         {suggestions.map((suggestion) => (
           <SuggestionCard key={suggestion.id} suggestion={suggestion} onSelect={onSelect} />
         ))}
-        {generating && <SuggestionSkeletons />}
+        {/* `generating` is not per-language but the cap is, so a batch running
+          * in another language would otherwise promise cards on a screen whose
+          * allowance is spent — where none can ever arrive. */}
+        {generating && !capReached && <SuggestionSkeletons />}
       </div>
 
       {/* Hidden once the cap is reached: an action that cannot succeed is worse

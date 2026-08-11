@@ -149,6 +149,45 @@ def test_a_language_outside_the_served_set_is_refused(api, language):
     assert api.called("generate") == 0
 
 
+def test_the_batch_that_spends_the_last_slot_says_so(api):
+    """The browser has no way to know the cap. If the successful batch does not
+    report it, Generate More stays on screen until the *next* press fails —
+    which is the press the customer is told about a limit they already hit."""
+    api.on_generate = [FakeSuggestion("The broth had real depth.")]
+    api.on_capped_languages = ["en"]
+
+    assert api.post(SUGGEST, json={}).json()["capReached"] is True
+
+
+def test_a_batch_with_slots_left_does_not_claim_the_cap(api):
+    api.on_generate = [FakeSuggestion("The broth had real depth.")]
+    api.on_capped_languages = []
+
+    assert api.post(SUGGEST, json={}).json()["capReached"] is False
+
+
+def test_the_cap_is_read_before_the_commit(api):
+    """Same transaction as the write it reports on — a second one would hold a
+    pooled connection idle behind every generation."""
+    api.on_generate = [FakeSuggestion("The broth had real depth.")]
+
+    api.post(SUGGEST, json={})
+
+    _session, commits_at_call = api.calls["capped_languages"][0]
+    assert commits_at_call == 0
+
+
+def test_another_language_being_spent_does_not_cap_this_one(api):
+    """The cap is per language, so the flag is about the language just
+    generated and no other."""
+    api.on_generate = [FakeSuggestion("湯頭很濃郁。", language="zh-Hant")]
+    api.on_capped_languages = ["en"]
+
+    response = api.post(SUGGEST, json={"language": "zh-Hant"})
+
+    assert response.json()["capReached"] is False
+
+
 def test_the_language_is_returned_with_each_suggestion(api):
     """The browser holds every language's suggestions at once and shows the
     ones matching the screen, so it cannot do that without this field."""

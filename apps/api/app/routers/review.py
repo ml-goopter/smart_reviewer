@@ -89,6 +89,10 @@ def get_session(
         )
     ).all()
 
+    # Read before the commit, with the suggestion list, so the response costs
+    # one transaction rather than opening a second one to answer it.
+    spent = suggestion_service.capped_languages(db, session)
+
     db.commit()
 
     return SessionResponse(
@@ -102,6 +106,7 @@ def get_session(
             PublicSuggestion(id=item.id, text=item.text_, language=item.language)
             for item in suggestions
         ],
+        capped_languages=spent,
         google_review_url=merchant.google_review_url or "",
     )
 
@@ -128,13 +133,20 @@ def generate_suggestions(
     language = payload.language if payload is not None else DEFAULT_LANGUAGE
 
     stored = suggestion_service.generate(db, session, provider, language)
+
+    # After the batch is stored, so the generation that spends the last slot
+    # reports its own language as spent rather than leaving that to the request
+    # after it. Before the commit, so this costs no extra transaction.
+    spent = suggestion_service.capped_languages(db, session)
+
     db.commit()
 
     return GenerateSuggestionsResponse(
         suggestions=[
             PublicSuggestion(id=item.id, text=item.text_, language=item.language)
             for item in stored
-        ]
+        ],
+        cap_reached=language in spent,
     )
 
 

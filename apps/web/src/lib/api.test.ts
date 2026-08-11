@@ -92,6 +92,33 @@ describe('loadSession', () => {
 
     expect(fetchMock.mock.calls[0]![0]).toBe('/api/review/sessions/a%2Fb%3Fc')
   })
+
+  it('carries the languages the server reports as spent', async () => {
+    vi.stubGlobal('fetch', respond(200, { ...VALID, cappedLanguages: ['en', 'zh-Hans'] }))
+
+    await expect(loadSession('t')).resolves.toMatchObject({
+      cappedLanguages: ['en', 'zh-Hans'],
+    })
+  })
+
+  it.each([
+    ['absent', undefined],
+    ['not a list', 'en'],
+  ])('substitutes an empty list for a %s cappedLanguages', async (_label, value) => {
+    // Reaches `.includes` on the first render, so `undefined` here is a blank
+    // screen rather than a missing feature.
+    vi.stubGlobal('fetch', respond(200, { ...VALID, cappedLanguages: value }))
+
+    await expect(loadSession('t')).resolves.toMatchObject({ cappedLanguages: [] })
+  })
+
+  it('drops a language it does not serve', async () => {
+    // An unrecognised tag would sit in the list forever, hiding Generate More
+    // for a language it does not name.
+    vi.stubGlobal('fetch', respond(200, { ...VALID, cappedLanguages: ['en', 'klingon'] }))
+
+    await expect(loadSession('t')).resolves.toMatchObject({ cappedLanguages: ['en'] })
+  })
 })
 
 describe('generateSuggestions', () => {
@@ -119,6 +146,27 @@ describe('generateSuggestions', () => {
     const batch = await generateSuggestions('t', 'en')
 
     expect(batch.suggestions).toEqual([{ id: '1', text: 'x', language: 'en' }])
+  })
+
+  it('reports the cap the batch just spent', async () => {
+    vi.stubGlobal('fetch', respond(201, { suggestions: [], capReached: true }))
+
+    await expect(generateSuggestions('t', 'en')).resolves.toMatchObject({
+      capReached: true,
+    })
+  })
+
+  it.each([
+    ['absent', undefined],
+    ['not a boolean', 'true'],
+  ])('treats a %s capReached as not capped', async (_label, value) => {
+    // The wrong way round costs a customer generations they still have; this
+    // way round costs one 429 that is already handled.
+    vi.stubGlobal('fetch', respond(201, { suggestions: [], capReached: value }))
+
+    await expect(generateSuggestions('t', 'en')).resolves.toMatchObject({
+      capReached: false,
+    })
   })
 })
 

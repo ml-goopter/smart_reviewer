@@ -23,7 +23,9 @@ const FALLBACK: Locale = 'en'
  *  same script as Taiwan; every other zh region is Simplified. */
 const HANT_REGIONS = new Set(['tw', 'hk', 'mo'])
 
-function isLocale(value: unknown): value is Locale {
+/** Exported because every untrusted source of a locale needs it: stored
+ *  preferences here, and the language tags the API reports as capped. */
+export function isLocale(value: unknown): value is Locale {
   return typeof value === 'string' && (LOCALES as readonly string[]).includes(value)
 }
 

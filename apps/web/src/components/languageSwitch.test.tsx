@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
-import { LOCALE_NAMES } from '../lib/i18n'
+import { CATALOGS, LOCALE_NAMES } from '../lib/i18n'
 import { LocaleProvider } from '../lib/i18n/context'
 import { memoryStorage } from '../lib/testing/memoryStorage'
 import { Reviewer } from './Reviewer'
@@ -211,5 +211,109 @@ describe('switching language', () => {
     await switchTo(LOCALE_NAMES['zh-Hans'])
 
     await waitFor(() => expect(posted).toEqual(['en', 'zh-Hans']))
+  })
+
+  it('does not let a failure in one language re-offer a spent press in another', async () => {
+    /* The failure state is not per-language, so a batch that fails after the
+     * customer has moved on lands on a screen it does not describe. If it
+     * outranks the cap there, the notice offers Try again — on a language with
+     * nothing left to try. */
+    let releaseEnglish: (response: Response) => void = () => {}
+    const english = new Promise<Response>((resolve) => {
+      releaseEnglish = resolve
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/suggestions')) {
+          const { language } = JSON.parse(String(init?.body ?? '{}'))
+          // Held open, so it can be failed after the switch rather than before.
+          return language === 'en' ? english : jsonResponse(201, { suggestions: [] })
+        }
+
+        // Traditional Chinese has cards and no allowance left; English has
+        // neither, so it is the language whose batch is in flight.
+        return jsonResponse(200, {
+          merchant: { name: 'Pho 37', category: 'Vietnamese Restaurant' },
+          session: { expiresAt: '2099-01-01T00:00:00Z' },
+          suggestions: TRADITIONAL,
+          cappedLanguages: ['zh-Hant'],
+          googleReviewUrl: GOOGLE,
+        })
+      }),
+    )
+
+    await mount()
+    await switchTo(LOCALE_NAMES['zh-Hant'])
+    await screen.findByText(TRADITIONAL[0]!.text)
+
+    await act(async () => {
+      releaseEnglish(jsonResponse(502, { error: 'generation_unavailable' }))
+      await english
+    })
+
+    const zhHant = CATALOGS['zh-Hant']
+
+    // The English failure really did land — this is the state under test, not
+    // its absence.
+    await waitFor(() =>
+      expect(document.querySelector('[aria-live="polite"]')?.textContent).toBe(
+        zhHant.announce.generateFailed,
+      ),
+    )
+
+    // And it did not take the screen: the cap outranks it, so no Try again.
+    expect(document.querySelector('.notice__text')?.textContent).toBe(
+      zhHant.notice.capReached,
+    )
+    expect(screen.queryByRole('button', { name: zhHant.notice.retry })).toBeNull()
+  })
+
+  it('does not promise cards to a language that cannot receive them', async () => {
+    /* `generating` is not per-language. A batch still running in the language
+     * the customer left would otherwise draw skeletons on a spent one, which
+     * promises three cards that can never arrive. */
+    let releaseEnglish: (response: Response) => void = () => {}
+    const english = new Promise<Response>((resolve) => {
+      releaseEnglish = resolve
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/suggestions')) {
+          const { language } = JSON.parse(String(init?.body ?? '{}'))
+          return language === 'en' ? english : jsonResponse(201, { suggestions: [] })
+        }
+
+        return jsonResponse(200, {
+          merchant: { name: 'Pho 37', category: 'Vietnamese Restaurant' },
+          session: { expiresAt: '2099-01-01T00:00:00Z' },
+          suggestions: [],
+          cappedLanguages: ['zh-Hant'],
+          googleReviewUrl: GOOGLE,
+        })
+      }),
+    )
+
+    await mount()
+
+    // English is genuinely mid-generation: the skeletons are on screen and the
+    // request has gone out. Without this the assertion below would hold for a
+    // batch that was never started.
+    await waitFor(() =>
+      expect(document.querySelectorAll('.skeleton').length).toBeGreaterThan(0),
+    )
+
+    await switchTo(LOCALE_NAMES['zh-Hant'])
+
+    // Same batch, still in flight, on a screen that cannot receive it.
+    expect(document.querySelectorAll('.skeleton').length).toBe(0)
+
+    await act(async () => {
+      releaseEnglish(jsonResponse(201, { suggestions: ENGLISH }))
+      await english
+    })
   })
 })

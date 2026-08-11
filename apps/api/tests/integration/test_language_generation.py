@@ -13,7 +13,11 @@ import pytest
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.models import SmartReviewSessionLanguage, SmartReviewSuggestion
+from app.models import (
+    LANGUAGES,
+    SmartReviewSessionLanguage,
+    SmartReviewSuggestion,
+)
 from app.routers.review import get_provider
 from tests.integration.test_suggestions import GOOD, StubProvider
 
@@ -197,3 +201,69 @@ def test_a_body_less_post_still_generates_english(api, merchant, provider, db):
     languages = db.scalars(select(SmartReviewSuggestion.language)).all()
 
     assert set(languages) == {"en"}
+
+
+def test_the_batch_that_spends_the_last_slot_reports_the_cap(api, merchant, provider):
+    """The browser cannot know the cap, so a batch that leaves no allowance has
+    to say so. Without it the limit is discoverable only from the request that
+    fails on it — one press after Generate More should have gone."""
+    cap = get_settings().max_generations_per_language
+    provider.responses = [json.dumps(GOOD) for _ in range(cap)]
+    token = token_for(api, merchant)
+
+    flags = [generate(api, token, "en").json()["capReached"] for _ in range(cap)]
+
+    # False until the last, and true on it — the boundary, not one either side.
+    assert flags == [False] * (cap - 1) + [True]
+
+
+def test_a_spent_language_does_not_report_another_as_capped(api, merchant, provider):
+    cap = get_settings().max_generations_per_language
+    provider.responses = [json.dumps(GOOD) for _ in range(cap)] + [json.dumps(CHINESE)]
+    token = token_for(api, merchant)
+
+    for _ in range(cap):
+        generate(api, token, "en")
+
+    # zh-Hant has no row at all, which is not the same as having no allowance.
+    assert generate(api, token, "zh-Hant").json()["capReached"] is False
+
+
+def test_get_reports_the_languages_a_returning_customer_has_spent(
+    api, merchant, provider
+):
+    """A session outlives the tab. The browser starts from this list, or it
+    starts every load believing the whole allowance is still there."""
+    cap = get_settings().max_generations_per_language
+    provider.responses = [json.dumps(GOOD) for _ in range(cap)] + [json.dumps(CHINESE)]
+    token = token_for(api, merchant)
+
+    assert api.get(f"{CREATE}/{token}").json()["cappedLanguages"] == []
+
+    for _ in range(cap):
+        generate(api, token, "en")
+    generate(api, token, "zh-Hant")
+
+    body = api.get(f"{CREATE}/{token}").json()
+
+    # Spent in English, and one batch into an allowance in Chinese.
+    assert body["cappedLanguages"] == ["en"]
+
+
+def test_a_zero_cap_is_reported_as_spent_before_anything_is_generated(
+    api, merchant, monkeypatch
+):
+    """Zero turns generation off, which the claim statement supports. A
+    language with no row is at zero generations, so the reported answer has to
+    come from comparing against the cap rather than from the row existing."""
+    monkeypatch.setenv("MAX_GENERATIONS_PER_LANGUAGE", "0")
+    get_settings.cache_clear()
+
+    try:
+        token = token_for(api, merchant)
+
+        assert api.get(f"{CREATE}/{token}").json()["cappedLanguages"] == list(LANGUAGES)
+    finally:
+        # Process-wide cache: leaving a zero cap behind would silently disarm
+        # every generation test that runs after this one.
+        get_settings.cache_clear()

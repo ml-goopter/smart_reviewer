@@ -1,4 +1,5 @@
 import type { Locale } from './i18n'
+import { isLocale } from './locale'
 import type { FailureKind, GeneratedBatch, Session, Suggestion } from './types'
 
 /* The four calls the SPA makes. `POST /api/review/sessions` is absent on
@@ -74,7 +75,15 @@ export async function loadSession(token: string): Promise<Session> {
   // nowhere — and would find out at the very last step, after doing the work.
   if (!isSafeDestination(data.googleReviewUrl)) throw new ApiFailure('session-gone')
 
-  return data
+  // Normalised rather than trusted: an API build without the field would put
+  // `undefined` where the reviewer calls `.includes`, and an unknown tag would
+  // sit in the list forever, silently hiding Generate More for nothing.
+  return {
+    ...data,
+    cappedLanguages: Array.isArray(data.cappedLanguages)
+      ? data.cappedLanguages.filter(isLocale)
+      : [],
+  }
 }
 
 export async function generateSuggestions(
@@ -98,6 +107,11 @@ export async function generateSuggestions(
       (item): item is Suggestion =>
         typeof item?.id === 'string' && typeof item?.text === 'string',
     ),
+    // Only an explicit `true` retires the button. Anything else — an older API
+    // build, a truncated body — leaves it in place, where the worst case is
+    // the 429 this field exists to pre-empt rather than a customer denied the
+    // generations they still have.
+    capReached: data?.capReached === true,
   }
 }
 

@@ -13,6 +13,15 @@
   color: var(--ink);
 }
 
+/* The shared top bar takes its spacing from `.app`'s flex gap on the customer
+ * side. A plain `.leads` block has none, so the wordmark would sit flush on
+ * whatever follows it — the crawler's heading, or the editor's two early
+ * returns. Excluded when `.leads` is also `.lead-panel`, which is a flex
+ * column whose own gap already spaces it. */
+.leads:not(.lead-panel) > .topbar {
+  margin-bottom: 20px;
+}
+
 .lead-header {
   display: flex;
   align-items: baseline;

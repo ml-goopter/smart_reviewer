@@ -27,6 +27,10 @@ export type Session = {
   merchant: Merchant
   session: { expiresAt: string }
   suggestions: Suggestion[]
+  /** Languages this session has no generations left in. Sent by the server
+   *  because the cap is its state: a session survives a reload and the trip to
+   *  Google, so a count kept here would restart at zero each load. */
+  cappedLanguages: Locale[]
   /** The only destination the browser is ever allowed to navigate to. It is
    *  chosen by the server and never constructed, edited, or defaulted here. */
   googleReviewUrl: string
@@ -34,6 +38,10 @@ export type Session = {
 
 export type GeneratedBatch = {
   suggestions: Suggestion[]
+  /** Whether this language's allowance is spent counting this batch. Without
+   *  it the limit is only discoverable from a request that fails, so Generate
+   *  More would survive one press past the last one it can honour. */
+  capReached: boolean
 }
 
 /** What survives the trip to Google and back. The session token is
