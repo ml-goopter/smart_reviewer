@@ -1,3 +1,4 @@
+import { useMessages } from '../lib/i18n/context'
 import type { FailureKind, Suggestion } from '../lib/types'
 
 /* AI output is rendered as text children only. There is no
@@ -38,6 +39,8 @@ export function SuggestionCard({
   suggestion: Suggestion
   onSelect: (suggestion: Suggestion) => void
 }) {
+  const messages = useMessages()
+
   return (
     <article className="card">
       <p className="card__text">{suggestion.text}</p>
@@ -46,7 +49,7 @@ export function SuggestionCard({
         * over — a customer who already likes card two should not have to wait
         * out a batch they asked for out of curiosity. */}
       <button className="btn btn--primary" onClick={() => onSelect(suggestion)}>
-        Use this review
+        {messages.card.use}
       </button>
     </article>
   )
@@ -74,14 +77,16 @@ export function GenerationNotice({
   onRetry: () => void
   onSkip: () => void
 }) {
+  const messages = useMessages()
+
   // 429 is the generation cap — retrying cannot succeed, so it is not offered.
   const exhausted = kind === 'rate-limited'
 
   const text = exhausted
     ? hasSuggestions
-      ? "You've reached the limit for new suggestions."
-      : "We couldn't prepare suggestions for you this time."
-    : "We couldn't generate new suggestions right now."
+      ? messages.notice.capReached
+      : messages.notice.capReachedEmpty
+    : messages.notice.failed
 
   return (
     <div className="notice">
@@ -89,7 +94,7 @@ export function GenerationNotice({
 
       {!exhausted && (
         <button className="btn btn--line" onClick={onRetry}>
-          Try again
+          {messages.notice.retry}
         </button>
       )}
 
@@ -98,7 +103,7 @@ export function GenerationNotice({
         * so it only appears when this notice is the whole screen. */}
       {!hasSuggestions && (
         <button className="link" onClick={onSkip}>
-          Write your own on Google →
+          {messages.notice.writeOwn}
         </button>
       )}
     </div>

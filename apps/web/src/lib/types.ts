@@ -1,3 +1,5 @@
+import type { Locale } from './i18n'
+
 /* Wire shapes, mirroring apps/api/app/schemas.py.
  *
  * The API serialises to camelCase via Pydantic `serialization_alias`, so these
@@ -8,6 +10,11 @@
 export type Suggestion = {
   id: string
   text: string
+  /** Which language this suggestion was drafted in. The server returns every
+   *  language the session has generated in at once and the screen shows only
+   *  the matching ones — filtering server-side would make each switch a
+   *  round-trip, and GET /sessions is a write that marks the session opened. */
+  language: Locale
 }
 
 export type Merchant = {
@@ -20,6 +27,10 @@ export type Session = {
   merchant: Merchant
   session: { expiresAt: string }
   suggestions: Suggestion[]
+  /** Languages this session has no generations left in. Sent by the server
+   *  because the cap is its state: a session survives a reload and the trip to
+   *  Google, so a count kept here would restart at zero each load. */
+  cappedLanguages: Locale[]
   /** The only destination the browser is ever allowed to navigate to. It is
    *  chosen by the server and never constructed, edited, or defaulted here. */
   googleReviewUrl: string
@@ -27,6 +38,10 @@ export type Session = {
 
 export type GeneratedBatch = {
   suggestions: Suggestion[]
+  /** Whether this language's allowance is spent counting this batch. Without
+   *  it the limit is only discoverable from a request that fails, so Generate
+   *  More would survive one press past the last one it can honour. */
+  capReached: boolean
 }
 
 /** What survives the trip to Google and back. The session token is

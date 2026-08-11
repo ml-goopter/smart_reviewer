@@ -1,7 +1,11 @@
 """The generation cap is the cost control: it is the only thing bounding how
 much AI spend a single session can cause. It is enforced as one atomic
-conditional UPDATE precisely so it holds without shared state across workers,
+conditional upsert precisely so it holds without shared state across workers,
 so the test that matters is the concurrent one.
+
+The cap is per language, so the concurrent case now has two halves: requests
+for one language must not exceed its cap, and requests for different languages
+must not block or spend each other's.
 """
 
 import uuid
@@ -56,10 +60,13 @@ def test_concurrent_claims_never_exceed_the_cap(engine):
     token = uuid.uuid4().hex
     session_id = _seed_session(own_engine, merchant_id, token)
 
-    def claim() -> int | None:
+    def claim(language: str = "en") -> int | None:
         session = Session()
         try:
-            granted = session.execute(CLAIM, {"session_id": session_id, "cap": CAP, "attempt_cap": 999}).scalar()
+            granted = session.execute(
+                CLAIM,
+                {"session_id": session_id, "language": language, "cap": CAP},
+            ).scalar()
             session.commit()
             return granted
         finally:
@@ -76,11 +83,21 @@ def test_concurrent_claims_never_exceed_the_cap(engine):
 
     with own_engine.begin() as conn:
         final = conn.execute(
-            text("SELECT generation_count FROM smart_review_sessions WHERE token = :t"),
-            {"t": token},
+            text(
+                "SELECT generation_count FROM smart_review_session_languages "
+                "WHERE session_id = :i AND language = 'en'"
+            ),
+            {"i": session_id},
         ).scalar_one()
 
     assert final == CAP
+
+    # A second language, hammered just as hard, gets its own full allowance —
+    # the row above is spent and does not stand in its way.
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        other = list(pool.map(lambda _: claim("zh-Hant"), range(12)))
+
+    assert sorted(value for value in other if value is not None) == [1, 2, 3, 4, 5]
 
     with own_engine.begin() as conn:
         conn.execute(text("DELETE FROM smart_review_sessions WHERE token = :t"), {"t": token})
@@ -99,8 +116,12 @@ def test_returning_value_is_the_generation_number(engine):
     session_id = _seed_session(own_engine, merchant_id, token)
 
     with own_engine.begin() as conn:
-        first = conn.execute(CLAIM, {"session_id": session_id, "cap": CAP, "attempt_cap": 999}).scalar()
-        second = conn.execute(CLAIM, {"session_id": session_id, "cap": CAP, "attempt_cap": 999}).scalar()
+        first = conn.execute(
+            CLAIM, {"session_id": session_id, "language": "en", "cap": CAP}
+        ).scalar()
+        second = conn.execute(
+            CLAIM, {"session_id": session_id, "language": "en", "cap": CAP}
+        ).scalar()
 
     assert (first, second) == (1, 2)
 

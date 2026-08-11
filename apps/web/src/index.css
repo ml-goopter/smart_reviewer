@@ -29,15 +29,54 @@
   --accent-soft: #e4f1ea;
   --border: #dce7e0;
 
-  --display: 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --body: 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* Chinese faces, chosen by script rather than left to the browser. The two
+   * scripts share codepoints, so a single stack cannot serve both — Simplified
+   * is the default and :lang(zh-Hant) below swaps it. System faces only, for
+   * the reason the label stack states.
+   *
+   * This is what `document.documentElement.lang` is for; without that attribute
+   * neither rule matches and both locales get whichever face the browser
+   * guesses. */
+  --cjk-hans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC',
+    'Source Han Sans SC';
+  --cjk-hant: 'PingFang TC', 'Hiragino Sans CNS', 'Microsoft JhengHei', 'Noto Sans TC',
+    'Source Han Sans TC';
+  --cjk: var(--cjk-hans);
+
+  /* --cjk sits after the Latin faces and before system-ui: 'Avenir Next' and
+   * 'Segoe UI' carry no CJK, so Latin still resolves to them and CJK falls
+   * through to a face we picked. Behind system-ui it would instead land in the
+   * platform's composite system font, which resolves CJK to its own default
+   * script and undoes the choice above. */
+  --display: 'Avenir Next', 'Segoe UI', var(--cjk), system-ui, -apple-system, sans-serif;
+  --body: 'Avenir Next', 'Segoe UI', var(--cjk), system-ui, -apple-system, sans-serif;
   /* Labels and buttons. No web font is loaded anywhere in this app: a font
    * request on the critical path competes with the session fetch, and the
    * merchant's name is the thing that has to arrive first. */
-  --label: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --label: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, var(--cjk), monospace;
 
   --radius: 14px;
   --btn-radius: 11px;
+}
+
+/* :lang() matches on a BCP-47 prefix, so this also covers zh-Hant-HK and any
+ * other region under zh-Hant. */
+:root:lang(zh-Hant) {
+  --cjk: var(--cjk-hant);
+}
+
+/* The label face is monospace at 12.5px with wide tracking and uppercase —
+ * devices that make a short Latin label read as deliberate, and that do
+ * nothing for CJK except make it cramped. Uppercase is already a no-op on
+ * these glyphs; the size and tracking are corrected here.
+ *
+ * `:lang(zh)` by prefix, so both scripts are covered by one rule. Only the
+ * controls that take var(--label) are listed: .own__hint is set in the body
+ * face already and needs no correction. */
+:root:lang(zh) .btn,
+:root:lang(zh) .link {
+  font-size: 15px;
+  letter-spacing: 0.04em;
 }
 
 * {
@@ -510,4 +549,215 @@ body {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* --- top bar and language drawer ----------------------------------------- */
+
+/* Values follow mockups/smart-reviewer-counter.html. The mockup scopes the
+ * drawer to a phone frame with position:absolute; here it is fixed to the
+ * viewport, which is what that frame was standing in for. */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topbar__wordmark {
+  font-family: var(--label);
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Terminal and loading screens centre their content, and a top bar in that
+ * flow would be centred with it. Taken out of the flow so those screens keep
+ * the layout they were designed with. */
+.app--center {
+  position: relative;
+}
+
+.app--center .topbar {
+  position: absolute;
+  top: calc(28px + env(safe-area-inset-top));
+  left: 30px;
+  right: 30px;
+}
+
+.menu {
+  width: 34px;
+  height: 34px;
+  /* Pulls the optical edge of the glyph to the layout edge; the button's tap
+   * target stays 34px. */
+  margin-right: -5px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink);
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.menu:hover {
+  color: var(--accent);
+}
+
+.menu:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 7px;
+}
+
+.menu svg {
+  width: 22px;
+  height: 22px;
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 24, 18, 0.42);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease;
+  z-index: 30;
+}
+
+.scrim--open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100svh;
+  width: 82%;
+  max-width: 300px;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  padding: 0 18px calc(22px + env(safe-area-inset-bottom));
+  box-shadow: -20px 0 44px -22px rgba(0, 0, 0, 0.4);
+}
+
+.drawer--open {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .drawer {
+    transition: none;
+  }
+}
+
+.drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(36px + env(safe-area-inset-top)) 4px 10px;
+}
+
+.drawer__title {
+  font-family: var(--label);
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.drawer__close {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.drawer__close:hover {
+  color: var(--accent);
+}
+
+.drawer__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.drawer__close svg {
+  width: 20px;
+  height: 20px;
+}
+
+.drawer__label {
+  font-family: var(--label);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 16px 6px 4px;
+}
+
+/* Each language is written in its own script, so this row is the one place in
+ * the app that is never in the current locale. It takes the body face rather
+ * than the label face for that reason. */
+.lang {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 12px 8px;
+  border-radius: 10px;
+  font-family: var(--body);
+  font-size: 16px;
+  color: var(--ink);
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.lang:hover {
+  background: var(--surface-2);
+}
+
+.lang:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.lang[aria-checked='true'] {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* Hidden rather than absent, so the label does not shift sideways when the
+ * selection moves between rows. */
+.lang__tick {
+  width: 17px;
+  height: 17px;
+  color: var(--accent);
+  flex: none;
+  visibility: hidden;
+}
+
+.lang[aria-checked='true'] .lang__tick {
+  visibility: visible;
 }

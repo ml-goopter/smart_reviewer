@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 
 import { App } from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { LocaleProvider } from './lib/i18n/context'
 import { routeFor } from './lib/route'
 import './index.css'
 
@@ -21,7 +22,14 @@ if (root !== null) {
     // request reach production, and each one costs money and a cap slot.
     <StrictMode>
       <ErrorBoundary>
-        <App route={route} />
+        {/* Above App, because every screen under it reads the catalogue and
+          * they are spread across two levels: App renders the unavailable
+          * screen itself, Reviewer renders the customer's, and the internal
+          * crawler its own. One provider, so the language chosen in the drawer
+          * is the same choice on either side of the tool. */}
+        <LocaleProvider>
+          <App route={route} />
+        </LocaleProvider>
       </ErrorBoundary>
     </StrictMode>,
   )

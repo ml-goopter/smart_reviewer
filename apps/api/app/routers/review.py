@@ -4,13 +4,14 @@ from sqlalchemy.orm import Session
 
 from app.client_ip import client_ip
 from app.db import get_db
-from app.models import SmartReviewSuggestion
+from app.models import DEFAULT_LANGUAGE, SmartReviewSuggestion
 from app.providers.base import SuggestionProvider
 from app.providers.openai_compat import OpenAICompatProvider
 from app.schemas import (
     CompleteSessionRequest,
     CreateSessionRequest,
     CreateSessionResponse,
+    GenerateSuggestionsRequest,
     GenerateSuggestionsResponse,
     PublicMerchant,
     PublicSession,
@@ -82,19 +83,30 @@ def get_session(
         select(SmartReviewSuggestion)
         .where(SmartReviewSuggestion.session_id == session.id)
         .order_by(
+            SmartReviewSuggestion.language,
             SmartReviewSuggestion.generation_number,
             SmartReviewSuggestion.position,
         )
     ).all()
+
+    # Read before the commit, with the suggestion list, so the response costs
+    # one transaction rather than opening a second one to answer it.
+    spent = suggestion_service.capped_languages(db, session)
 
     db.commit()
 
     return SessionResponse(
         merchant=PublicMerchant(name=merchant.name, category=merchant.category),
         session=PublicSession(expires_at=session.expires_at),
+        # Every language, tagged. The browser shows only those matching the
+        # language on screen and keeps the rest, so switching back to one it has
+        # already generated costs no round-trip — and this endpoint marks the
+        # session opened, so a refetch per switch would inflate that count.
         suggestions=[
-            PublicSuggestion(id=item.id, text=item.text_) for item in suggestions
+            PublicSuggestion(id=item.id, text=item.text_, language=item.language)
+            for item in suggestions
         ],
+        capped_languages=spent,
         google_review_url=merchant.google_review_url or "",
     )
 
@@ -106,16 +118,35 @@ def get_session(
 )
 def generate_suggestions(
     token: str,
+    payload: GenerateSuggestionsRequest | None = None,
     db: Session = Depends(get_db),
     provider: SuggestionProvider = Depends(get_provider),
 ) -> GenerateSuggestionsResponse:
+    """The language is optional and defaults to English.
+
+    Optional rather than required because a body-less POST is a valid request
+    to this endpoint and always has been; making it mandatory would turn every
+    such caller into a 422 to add a field they have no opinion about.
+    """
     session = session_service.load_valid_session(db, token)
 
-    stored = suggestion_service.generate(db, session, provider)
+    language = payload.language if payload is not None else DEFAULT_LANGUAGE
+
+    stored = suggestion_service.generate(db, session, provider, language)
+
+    # After the batch is stored, so the generation that spends the last slot
+    # reports its own language as spent rather than leaving that to the request
+    # after it. Before the commit, so this costs no extra transaction.
+    spent = suggestion_service.capped_languages(db, session)
+
     db.commit()
 
     return GenerateSuggestionsResponse(
-        suggestions=[PublicSuggestion(id=item.id, text=item.text_) for item in stored]
+        suggestions=[
+            PublicSuggestion(id=item.id, text=item.text_, language=item.language)
+            for item in stored
+        ],
+        cap_reached=language in spent,
     )
 
 

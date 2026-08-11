@@ -1,10 +1,21 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render as renderBare, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ReactElement } from 'react'
+
+import { LocaleProvider } from '../../lib/i18n/context'
 
 import { ContextEditor } from './ContextEditor'
 import { CopyButton } from './CopyButton'
 import { LeadCrawler } from './LeadCrawler'
 import type { LeadSearchResponse } from '../../lib/leadTypes'
+
+/* Every screen here reads the catalogue, so every render needs the provider.
+ * Pinned to English: these tests assert the English wording, and the drawer's
+ * own behaviour is TopBar.test.tsx's subject. `localised.test.tsx` is what
+ * proves the crawler holds no literal. */
+function render(element: ReactElement) {
+  return renderBare(<LocaleProvider initial="en">{element}</LocaleProvider>)
+}
 
 /* The parts of the crawler that are easy to get wrong and invisible to a type
  * check: the funnel that keeps a short list legible, the criteria that must not
@@ -181,6 +192,13 @@ describe('the funnel', () => {
     await runValidSearch()
 
     expect(await screen.findByText(/Richmond, BC V6X 1T3, Canada/)).toBeTruthy()
+    // Written out rather than assembled from the catalogue: the sentence is
+    // split around the emphasised place so each language can put it where its
+    // own word order wants it, which leaves the spacing either side
+    // load-bearing and invisible to a test that reads the same two halves.
+    expect(document.querySelector('.lead-resolved')?.textContent).toBe(
+      'Searched around Richmond, BC V6X 1T3, Canada.',
+    )
   })
 
   it('explains an empty list rather than leaving it blank', async () => {
@@ -440,7 +458,7 @@ describe('saving', () => {
     expect(await screen.findByText(/was already saved/)).toBeTruthy()
   })
 
-  it('passes on the warning that an archived URL will not open', async () => {
+  it('warns in its own words that an archived URL will not open', async () => {
     await runValidSearch()
     await screen.findByText('Sushi Mura')
 
@@ -449,13 +467,18 @@ describe('saving', () => {
         ? reply(CATEGORIES)
         : reply({
             created: false,
-            note: 'archived — this URL will not open',
+            // Deliberately not the sentence the server really sends. The note
+            // is prose, and prose from the API cannot be translated — so what
+            // is shown is built here, from the status beside it. Echoing this
+            // back would put an English line under a Chinese header.
+            note: 'the server worded this itself',
             merchant: { ...SAVED_MERCHANT, status: 'ARCHIVED', url: null },
           }),
     )
     await click('Save')
 
     expect(await screen.findByText(/archived — this URL will not open/)).toBeTruthy()
+    expect(screen.queryByText(/the server worded this itself/)).toBeNull()
   })
 
   it('offers no URL for a merchant whose status has none', async () => {
@@ -781,7 +804,11 @@ describe('the context editor', () => {
 
     const field = screen.getByLabelText('Custom instructions')
     const hint = document.getElementById(field.getAttribute('aria-describedby')!)
-    expect(hint!.textContent).toMatch(/No links/)
+    // A link here fails output validation for every suggestion this merchant
+    // ever generates, so the hint has to say so before it is typed.
+    expect(hint!.textContent).toMatch(/do not/i)
+    expect(hint!.textContent).toMatch(/links/)
+    expect(hint!.textContent).toMatch(/validation/)
   })
 
   it('shows the snapshot date beside the rating', async () => {

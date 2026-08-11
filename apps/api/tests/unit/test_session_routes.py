@@ -113,6 +113,8 @@ def test_get_serialises_camel_case(api):
     assert "expires_at" not in body["session"]
     assert "googleReviewUrl" in body
     assert "google_review_url" not in body
+    assert "cappedLanguages" in body
+    assert "capped_languages" not in body
 
 
 def test_get_never_leaks_internal_fields(api):
@@ -160,6 +162,29 @@ def test_get_returns_an_empty_list_when_nothing_has_been_generated(api):
     """The normal first load, because R4 means GET never generates. The client
     treats this as "ask for a batch", not as a failure."""
     assert api.get(f"{CREATE}/{TOKEN}").json()["suggestions"] == []
+
+
+def test_get_reports_which_languages_are_already_spent(api):
+    """A session outlives the tab: it survives a reload and a trip to Google.
+    Without this the browser starts every load believing the full allowance is
+    there, and finds out otherwise from a press that fails."""
+    api.on_capped_languages = ["en", "zh-Hant"]
+
+    assert api.get(f"{CREATE}/{TOKEN}").json()["cappedLanguages"] == ["en", "zh-Hant"]
+
+
+def test_get_reports_no_spent_languages_on_a_fresh_session(api):
+    assert api.get(f"{CREATE}/{TOKEN}").json()["cappedLanguages"] == []
+
+
+def test_get_reads_the_spent_languages_before_it_commits(api):
+    """Otherwise the read opens a second transaction and holds a pooled
+    connection idle for the rest of the request, on an endpoint every customer
+    hits on arrival."""
+    api.get(f"{CREATE}/{TOKEN}")
+
+    _session, commits_at_call = api.calls["capped_languages"][0]
+    assert commits_at_call == 0
 
 
 @pytest.mark.parametrize(

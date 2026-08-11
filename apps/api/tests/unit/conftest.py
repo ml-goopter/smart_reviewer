@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from app.db import get_db
 from app.main import app
+from app.models import DEFAULT_LANGUAGE
 from app.routers.review import get_provider
 from app.services import sessions as session_service
 from app.services import suggestions as suggestion_service
@@ -39,9 +40,15 @@ class FakeMerchant:
 
 
 class FakeSuggestion:
-    def __init__(self, text: str, id_: UUID | None = None) -> None:
+    def __init__(
+        self,
+        text: str,
+        id_: UUID | None = None,
+        language: str = DEFAULT_LANGUAGE,
+    ) -> None:
         self.id = id_ or uuid4()
         self.text_ = text
+        self.language = language
 
 
 class FakeSession:
@@ -102,11 +109,15 @@ class Api:
             "select_suggestion": [],
             "complete_session": [],
             "generate": [],
+            "capped_languages": [],
         }
 
         self.on_create_session: object = FakeSession()
         self.on_load_valid_session: object = FakeSession()
         self.on_generate: object = []
+        # Which languages the service says are spent. Empty is the ordinary
+        # case; a test that cares about the cap sets it.
+        self.on_capped_languages: list[str] = []
 
     def _resolve(self, name: str, args, result):
         self.calls[name].append(args)
@@ -137,8 +148,20 @@ class Api:
     def complete_session(self, _db, session, suggestion_id, review_copied):
         self.calls["complete_session"].append((session, suggestion_id, review_copied))
 
-    def generate(self, _db, session, provider):
-        return self._resolve("generate", (session, provider), self.on_generate)
+    def generate(self, _db, session, provider, language=DEFAULT_LANGUAGE):
+        # The language is recorded so a route test can assert which one the
+        # router passed down — that is the whole of the router's contribution.
+        return self._resolve(
+            "generate", (session, provider, language), self.on_generate
+        )
+
+    def capped_languages(self, _db, session):
+        # The commit count at call time, so a test can pin that the routes read
+        # this inside the transaction they already have rather than opening a
+        # second one to answer with.
+        return self._resolve(
+            "capped_languages", (session, self.db.commits), self.on_capped_languages
+        )
 
     # --- convenience -------------------------------------------------------
 
@@ -165,6 +188,9 @@ def api(monkeypatch):
                  "select_suggestion", "complete_session"):
         monkeypatch.setattr(session_service, name, getattr(harness, name))
     monkeypatch.setattr(suggestion_service, "generate", harness.generate)
+    monkeypatch.setattr(
+        suggestion_service, "capped_languages", harness.capped_languages
+    )
 
     app.dependency_overrides[get_db] = lambda: db
     # Never a real client: a test must not make a paid, non-deterministic call.

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 
+import { CATALOGS } from '../lib/i18n'
+import { LocaleProvider } from '../lib/i18n/context'
 import { Reviewer } from './Reviewer'
 
 /* The constraints §49 calls "easy to get wrong" — one generation ever, the
@@ -21,8 +23,8 @@ const SESSION = {
 
 const BATCH = {
   suggestions: [
-    { id: 's1', text: 'The beef pho was excellent.' },
-    { id: 's2', text: 'Service was quick and friendly.' },
+    { id: 's1', text: 'The beef pho was excellent.', language: 'en' },
+    { id: 's2', text: 'Service was quick and friendly.', language: 'en' },
   ],
 }
 
@@ -91,7 +93,11 @@ afterEach(() => {
 })
 
 async function mount(strict = false) {
-  const tree = <Reviewer token={TOKEN} />
+  const tree = (
+    <LocaleProvider initial="en">
+      <Reviewer token={TOKEN} />
+    </LocaleProvider>
+  )
   render(strict ? <StrictMode>{tree}</StrictMode> : tree)
   await screen.findByText('Pho 37')
 }
@@ -158,6 +164,119 @@ describe('a failed first batch is not a dead end', () => {
   })
 })
 
+describe('the cap is shown by the batch that spends it', () => {
+  /** A server that allows exactly `cap` batches and reports the last one as
+   *  spending the allowance — which is what the real one does. */
+  function stubCappedAt(cap: number) {
+    let call = 0
+
+    return stubApi({
+      suggestions: () => {
+        call += 1
+        if (call > cap) return jsonResponse(429, { error: 'generation_limit_reached' })
+
+        return jsonResponse(201, {
+          suggestions: [{ id: `b${call}`, text: `Batch ${call} suggestion.`, language: 'en' }],
+          capReached: call === cap,
+        })
+      },
+    })
+  }
+
+  it('retires Generate More on the last allowed batch, not the press after it', async () => {
+    // Two allowed: the automatic first batch, then one press. The press after
+    // that is the one that used to be needed before anything said "cap".
+    const { calls } = stubCappedAt(2)
+
+    await mount()
+    await screen.findByText('Batch 1 suggestion.')
+
+    await act(async () => {
+      screen.getByRole('button', { name: /generate more/i }).click()
+    })
+    await screen.findByText('Batch 2 suggestion.')
+
+    expect(screen.queryByRole('button', { name: /generate more/i })).toBeNull()
+    // And no press was spent finding out.
+    expect(countOf(calls, '/suggestions')).toBe(2)
+  })
+
+  it('says the limit is reached without waiting for a request to fail', async () => {
+    stubCappedAt(1)
+
+    await mount()
+    await screen.findByText('Batch 1 suggestion.')
+
+    await waitFor(() =>
+      expect(document.querySelector('.notice__text')?.textContent).toMatch(
+        /reached the limit/i,
+      ),
+    )
+  })
+
+  it('keeps the cards it just delivered', async () => {
+    // The notice renders inline; a cap must not cost the customer the batch
+    // that reached it. Both halves are asserted together — the card alone
+    // holds whether or not the cap is ever noticed.
+    stubCappedAt(1)
+
+    await mount()
+    await screen.findByText('Batch 1 suggestion.')
+
+    await waitFor(() =>
+      expect(document.querySelector('.notice__text')?.textContent).toMatch(
+        /reached the limit/i,
+      ),
+    )
+    expect(screen.getAllByRole('button', { name: /use this review/i }).length).toBe(1)
+  })
+
+  it('never offers a generation a returning customer has already spent', async () => {
+    // The session outlives the tab, so the button has to go on what the server
+    // reports rather than on anything this page has watched happen.
+    stubApi({
+      session: () =>
+        jsonResponse(200, {
+          ...SESSION,
+          suggestions: [{ id: 'old', text: 'From an earlier visit.', language: 'en' }],
+          cappedLanguages: ['en'],
+        }),
+    })
+
+    await mount()
+    await screen.findByText('From an earlier visit.')
+
+    expect(screen.queryByRole('button', { name: /generate more/i })).toBeNull()
+  })
+
+  it('does not automatically ask for a batch it cannot be given', async () => {
+    // Deliberately no suggestions to fall back on, which is the shape a zero
+    // cap produces: the list is empty and the allowance is still spent. The
+    // "already has suggestions" guard cannot cover this one, so without the
+    // capped check the page opens by spending a doomed request.
+    const { calls } = stubApi({
+      session: () => jsonResponse(200, { ...SESSION, cappedLanguages: ['en'] }),
+    })
+
+    await mount()
+
+    // The empty wording, because a spent language with no cards is what a zero
+    // cap looks like — the customer has been shown nothing to have a limit on.
+    await waitFor(() =>
+      expect(document.querySelector('.notice__text')?.textContent).toBe(
+        CATALOGS.en.notice.capReachedEmpty,
+      ),
+    )
+    expect(countOf(calls, '/suggestions')).toBe(0)
+    expect(screen.queryByRole('button', { name: /generate more/i })).toBeNull()
+    // The cap is the one kind the notice must not offer a retry for.
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
+    // Google is still reachable — a cap must never be a dead end.
+    expect(screen.getAllByRole('button', { name: /google|write your own/i }).length)
+      .toBeGreaterThan(0)
+  })
+})
+
 describe('suggestions accumulate', () => {
   it('appends the new batch below the old one instead of replacing it', async () => {
     let call = 0
@@ -165,7 +284,9 @@ describe('suggestions accumulate', () => {
       suggestions: () => {
         call += 1
         return jsonResponse(201, {
-          suggestions: [{ id: `b${call}`, text: `Batch ${call} suggestion.` }],
+          suggestions: [
+            { id: `b${call}`, text: `Batch ${call} suggestion.`, language: 'en' },
+          ],
         })
       },
     })
@@ -232,7 +353,11 @@ describe('the editor', () => {
 
     cleanup()
     const second = stubApi()
-    render(<Reviewer token={TOKEN} />)
+    render(
+      <LocaleProvider initial="en">
+        <Reviewer token={TOKEN} />
+      </LocaleProvider>,
+    )
 
     await waitFor(() => {
       expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(
@@ -325,7 +450,11 @@ describe('continue to Google', () => {
 describe('a dead token is terminal wherever it surfaces', () => {
   it('shows the rescan advice when the session load 410s', async () => {
     stubApi({ session: () => jsonResponse(410, { error: 'session_unavailable' }) })
-    render(<Reviewer token={TOKEN} />)
+    render(
+      <LocaleProvider initial="en">
+        <Reviewer token={TOKEN} />
+      </LocaleProvider>,
+    )
 
     await screen.findByText(/this review session is no longer available/i)
     // Never the cause, and never the merchant.
@@ -337,7 +466,11 @@ describe('a dead token is terminal wherever it surfaces', () => {
       session: () =>
         jsonResponse(200, { ...SESSION, googleReviewUrl: "javascript:alert('x')" }),
     })
-    render(<Reviewer token={TOKEN} />)
+    render(
+      <LocaleProvider initial="en">
+        <Reviewer token={TOKEN} />
+      </LocaleProvider>,
+    )
 
     await screen.findByText(/no longer available/i)
     expect(assigned).toEqual([])
@@ -347,7 +480,11 @@ describe('a dead token is terminal wherever it surfaces', () => {
 describe('announcements', () => {
   it('mounts the live region before there is anything to announce', async () => {
     stubApi({ session: () => jsonResponse(200, SESSION) })
-    render(<Reviewer token={TOKEN} />)
+    render(
+      <LocaleProvider initial="en">
+        <Reviewer token={TOKEN} />
+      </LocaleProvider>,
+    )
 
     // Present during loading, i.e. before the first message. A live region
     // inserted together with its text is usually not announced at all.
@@ -358,6 +495,38 @@ describe('announcements', () => {
     await screen.findByText(BATCH.suggestions[0]!.text)
     expect(document.querySelector('[aria-live="polite"]')?.textContent).toMatch(
       /suggestions ready/i,
+    )
+  })
+
+  it('says the cap on the successful batch that retires the button', async () => {
+    // The control disappears on a success, so the cap — not the card count —
+    // is the change somebody who cannot see it going needs told.
+    stubApi({
+      suggestions: () => jsonResponse(201, { ...BATCH, capReached: true }),
+    })
+
+    await mount()
+    await screen.findByText(BATCH.suggestions[0]!.text)
+
+    await waitFor(() =>
+      expect(document.querySelector('[aria-live="polite"]')?.textContent).toBe(
+        CATALOGS.en.notice.capReached,
+      ),
+    )
+  })
+
+  it('does not word a spent allowance as a failure', async () => {
+    // The notice says the limit is reached and offers no retry; an
+    // announcement saying generation failed tells the customer to do something
+    // the screen does not let them do.
+    stubApi({ suggestions: () => jsonResponse(429, { error: 'generation_limit_reached' }) })
+
+    await mount()
+
+    await waitFor(() =>
+      expect(document.querySelector('[aria-live="polite"]')?.textContent).toBe(
+        CATALOGS.en.notice.capReachedEmpty,
+      ),
     )
   })
 })

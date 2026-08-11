@@ -29,15 +29,18 @@ def test_returns_201_with_the_generated_batch(api):
     ]
 
 
-def test_a_suggestion_exposes_only_id_and_text(api):
+def test_a_suggestion_exposes_only_id_text_and_language(api):
     """The stored row also carries a topic, a prompt version, a model name and
     a generation number. None of it is the customer's business, and a response
-    model that named them would put the prompt strategy on a public endpoint."""
+    model that named them would put the prompt strategy on a public endpoint.
+
+    Language is the one addition: the browser is sent every language's
+    suggestions at once and needs it to show the right ones."""
     api.on_generate = [FakeSuggestion("The broth had real depth.")]
 
     item = api.post(SUGGEST, json={}).json()["suggestions"][0]
 
-    assert set(item) == {"id", "text"}
+    assert set(item) == {"id", "text", "language"}
 
 
 def test_a_short_batch_is_returned_as_is(api):
@@ -108,3 +111,88 @@ def test_a_failure_never_names_the_provider(api):
 
     for leaked in ("openai", "gemini", "api_key", "quota", "http"):
         assert leaked not in body.lower()
+
+
+def test_the_requested_language_reaches_the_service(api):
+    """The router's whole contribution to this feature is carrying the value
+    down. Nothing else on the request names a language."""
+    api.on_generate = [FakeSuggestion("湯頭很濃郁。", language="zh-Hant")]
+
+    api.post(SUGGEST, json={"language": "zh-Hant"})
+
+    _session, _provider, language = api.calls["generate"][-1]
+    assert language == "zh-Hant"
+
+
+def test_no_language_means_english(api):
+    """A body-less POST is still valid, and predates the field entirely."""
+    api.on_generate = [FakeSuggestion("The broth had real depth.")]
+
+    api.post(SUGGEST)
+
+    _session, _provider, language = api.calls["generate"][-1]
+    assert language == "en"
+
+
+@pytest.mark.parametrize("language", ["klingon", "zh", "", "en-US", "ZH-HANT"])
+def test_a_language_outside_the_served_set_is_refused(api, language):
+    """This value is interpolated into the model prompt, so anything not on the
+    list is refused at the edge rather than reaching the service. Near-misses
+    are included deliberately: `zh` and `en-US` are plausible tags a client
+    might send, and neither names a catalogue we have."""
+    response = api.post(SUGGEST, json={"language": language})
+
+    # 400 and a fixed code, not FastAPI's 422 field breakdown — the house
+    # contract for a malformed request, set in errors.py.
+    assert response.status_code == 400
+    assert response.json() == {"error": "invalid_request"}
+    assert api.called("generate") == 0
+
+
+def test_the_batch_that_spends_the_last_slot_says_so(api):
+    """The browser has no way to know the cap. If the successful batch does not
+    report it, Generate More stays on screen until the *next* press fails —
+    which is the press the customer is told about a limit they already hit."""
+    api.on_generate = [FakeSuggestion("The broth had real depth.")]
+    api.on_capped_languages = ["en"]
+
+    assert api.post(SUGGEST, json={}).json()["capReached"] is True
+
+
+def test_a_batch_with_slots_left_does_not_claim_the_cap(api):
+    api.on_generate = [FakeSuggestion("The broth had real depth.")]
+    api.on_capped_languages = []
+
+    assert api.post(SUGGEST, json={}).json()["capReached"] is False
+
+
+def test_the_cap_is_read_before_the_commit(api):
+    """Same transaction as the write it reports on — a second one would hold a
+    pooled connection idle behind every generation."""
+    api.on_generate = [FakeSuggestion("The broth had real depth.")]
+
+    api.post(SUGGEST, json={})
+
+    _session, commits_at_call = api.calls["capped_languages"][0]
+    assert commits_at_call == 0
+
+
+def test_another_language_being_spent_does_not_cap_this_one(api):
+    """The cap is per language, so the flag is about the language just
+    generated and no other."""
+    api.on_generate = [FakeSuggestion("湯頭很濃郁。", language="zh-Hant")]
+    api.on_capped_languages = ["en"]
+
+    response = api.post(SUGGEST, json={"language": "zh-Hant"})
+
+    assert response.json()["capReached"] is False
+
+
+def test_the_language_is_returned_with_each_suggestion(api):
+    """The browser holds every language's suggestions at once and shows the
+    ones matching the screen, so it cannot do that without this field."""
+    api.on_generate = [FakeSuggestion("湯頭很濃郁。", language="zh-Hant")]
+
+    item = api.post(SUGGEST, json={"language": "zh-Hant"}).json()["suggestions"][0]
+
+    assert item["language"] == "zh-Hant"

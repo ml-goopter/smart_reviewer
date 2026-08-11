@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from './App'
+import { LocaleProvider } from './lib/i18n/context'
 
 /* The only in-app navigation the product has: the crawler's list and a
  * merchant's editor. It is history, so the browser's Back button is part of the
@@ -88,7 +89,11 @@ async function roundTrip() {
 
 describe('moving between the crawler and an editor', () => {
   it('pops the entry it pushed instead of pushing another', async () => {
-    render(<App route={{ name: 'leads' }} />)
+    render(
+      <LocaleProvider initial="en">
+        <App route={{ name: 'leads' }} />
+      </LocaleProvider>,
+    )
     const before = window.history.length
 
     await roundTrip()
@@ -103,7 +108,11 @@ describe('moving between the crawler and an editor', () => {
   it('still reaches the list when the editor was opened by its URL', async () => {
     // Nothing of ours is on the stack, so back() would leave the site.
     window.history.replaceState(null, '', `/leads/${ID}`)
-    render(<App route={{ name: 'leadEditor', merchantId: ID }} />)
+    render(
+      <LocaleProvider initial="en">
+        <App route={{ name: 'leadEditor', merchantId: ID }} />
+      </LocaleProvider>,
+    )
     await screen.findByText('Pho 37')
 
     await act(async () => {

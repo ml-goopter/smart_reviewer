@@ -1,4 +1,5 @@
 import { useFocusOnMount } from '../lib/a11y'
+import { useMessages } from '../lib/i18n/context'
 
 /** The editor, and the last screen before Google.
  *
@@ -27,29 +28,30 @@ export function SelectedReviewEditor({
   // The merchant's name is not on this screen, so this is the page's only
   // top-level heading. An h2 here would start the document outline at level 2.
   const heading = useFocusOnMount<HTMLHeadingElement>()
+  const messages = useMessages()
   const untouched = value === originalText
 
   return (
     <>
       <div className="stack">
         <h1 className="question" tabIndex={-1} ref={heading}>
-          Make it your own
+          {messages.editor.heading}
         </h1>
-        <p className="lead">You can edit this suggestion before continuing to Google.</p>
+        <p className="lead">{messages.editor.lead}</p>
       </div>
 
       <div className="field">
         <textarea
           className="textarea"
-          aria-label="Your review"
+          aria-label={messages.editor.textareaLabel}
           value={value}
           onChange={(event) => onChange(event.target.value)}
         />
         <button
           className="reset"
           type="button"
-          aria-label="Reset to the original suggestion"
-          title="Reset to the original suggestion"
+          aria-label={messages.editor.resetLabel}
+          title={messages.editor.resetLabel}
           disabled={untouched}
           onClick={onReset}
         >
@@ -72,9 +74,7 @@ export function SelectedReviewEditor({
         * they are not reading an interstitial, and Continue is a direct
         * redirect — there is no second screen to put this on. */}
       <p className="lead">
-        {value.trim() === ''
-          ? 'Nothing will be copied — you can write your review on Google.'
-          : "We'll copy your review and open Google. Paste it into the review box, add your star rating, and post."}
+        {value.trim() === '' ? messages.editor.emptyHint : messages.editor.copyHint}
       </p>
 
       <div className="actions">
@@ -83,7 +83,7 @@ export function SelectedReviewEditor({
           * this screen has no other way out to Google. An empty review simply
           * skips the copy. */}
         <button className="btn btn--primary" disabled={leaving} onClick={onContinue}>
-          {leaving ? 'Opening Google…' : 'Continue to Google Reviews'}
+          {leaving ? messages.editor.opening : messages.editor.continue}
         </button>
       </div>
 
@@ -93,13 +93,11 @@ export function SelectedReviewEditor({
         * cards, and any unspent generations, permanently out of reach. */}
       <div className="own">
         <button className="link" onClick={onBack} disabled={leaving}>
-          ← Choose a different suggestion
+          {messages.editor.back}
         </button>
       </div>
 
-      <p className="authenticity">
-        Only use wording that reflects your genuine experience.
-      </p>
+      <p className="authenticity">{messages.editor.authenticity}</p>
     </>
   )
 }
