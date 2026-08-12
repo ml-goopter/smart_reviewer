@@ -4,6 +4,7 @@ import type { ReactElement } from 'react'
 
 import { LocaleProvider } from '../../lib/i18n/context'
 
+import { DEFAULT_TERM_DAYS } from '../../lib/leadsApi'
 import { ContextEditor } from './ContextEditor'
 import { CopyButton } from './CopyButton'
 import { LeadCrawler } from './LeadCrawler'
@@ -741,7 +742,7 @@ describe('the context editor', () => {
           status: 'ACTIVE',
           expiresAt: '2026-09-12T07:00:00Z',
           lastValidDay: '2026-09-11',
-          duration: 21,
+          duration: DEFAULT_TERM_DAYS,
           durationUnit: 'day',
         })
       }
@@ -757,12 +758,12 @@ describe('the context editor', () => {
     const calls = subscriptionReplies(SAVED_MERCHANT.subscription)
     await openEditor()
 
-    await click('Renew 21 days')
+    await click(`Renew ${DEFAULT_TERM_DAYS} days`)
 
     expect(calls).toHaveLength(1)
     expect(calls[0]!.method).toBe('POST')
     expect(JSON.parse(calls[0]!.body as string)).toEqual({
-      duration: 21,
+      duration: DEFAULT_TERM_DAYS,
       durationUnit: 'day',
     })
   })
@@ -771,7 +772,9 @@ describe('the context editor', () => {
     subscriptionReplies(null)
     await openEditor()
 
-    expect(screen.getByRole('button', { name: 'Subscribe 21 days' })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: `Subscribe ${DEFAULT_TERM_DAYS} days` }),
+    ).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Renew/ })).toBeNull()
     // Nothing to suspend yet.
     expect(screen.queryByRole('button', { name: 'Suspend' })).toBeNull()
@@ -798,7 +801,9 @@ describe('the context editor', () => {
     expect(screen.queryByRole('button', { name: 'Suspend' })).toBeNull()
     // Renew is still offered — a term can be extended while suspended — so the
     // note has to say that doing so will not reopen the URL.
-    expect(screen.getByRole('button', { name: 'Renew 21 days' })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: `Renew ${DEFAULT_TERM_DAYS} days` }),
+    ).toBeTruthy()
     expect(screen.getByText(/only Resume reopens the URL/)).toBeTruthy()
   })
 
