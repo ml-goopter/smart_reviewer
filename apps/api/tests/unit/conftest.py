@@ -33,7 +33,6 @@ class FakeMerchant:
         self.name = "Pho 37"
         self.category = "Vietnamese Restaurant"
         self.google_review_url = "https://example.test/writereview"
-        self.status = "ACTIVE"
         self.slug = "pho37"
         self.google_place_id = "ChIJPrivateInternalValue"
         self.__dict__.update(overrides)

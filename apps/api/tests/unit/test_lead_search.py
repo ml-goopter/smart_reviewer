@@ -17,11 +17,18 @@ from app.providers.places_base import (
     SearchPage,
 )
 from app.services import leads as lead_service
+from types import SimpleNamespace
+
 from app.services.leads import LocationNotFound, SearchCriteria
 
 
 class NoDb:
-    """Search reads merchants once, to mark already-saved rows."""
+    """Search reads merchants once, to mark already-saved rows.
+
+    `rows` are Merchant-shaped: the lookup selects entities so each saved row's
+    subscription rides along on the same query rather than being lazy-loaded
+    once per result.
+    """
 
     def __init__(self, rows=()) -> None:
         self.rows = list(rows)
@@ -29,6 +36,9 @@ class NoDb:
 
     def execute(self, _statement):
         self.queries += 1
+        return self
+
+    def scalars(self):
         return self
 
     def all(self):
@@ -441,7 +451,10 @@ def test_saved_rows_are_marked_in_one_query():
     from uuid import uuid4
 
     merchant_id = uuid4()
-    db = NoDb(rows=[("a", merchant_id, "ACTIVE")])
+    saved_row = SimpleNamespace(
+        google_place_id="a", id=merchant_id, subscription=None
+    )
+    db = NoDb(rows=[saved_row])
     provider = ScriptedProvider([page(place("a"), place("b"))])
 
     outcome = lead_service.search(db, provider, CRITERIA)
@@ -450,7 +463,6 @@ def test_saved_rows_are_marked_in_one_query():
     by_id = {hit.place.place_id: hit for hit in outcome.results}
     assert by_id["a"].saved is True
     assert by_id["a"].merchant_id == merchant_id
-    assert by_id["a"].status == "ACTIVE"
     assert by_id["b"].saved is False
 
 

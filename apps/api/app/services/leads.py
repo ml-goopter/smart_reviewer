@@ -17,7 +17,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import LEAD_SEARCH_BUDGET_SECONDS, get_settings
 from app.geo import haversine_m
@@ -30,7 +30,12 @@ from app.providers.places_base import (
     PlacesQuery,
     ProviderError,
 )
-from app.seed import GOOGLE_REVIEW_URL_TEMPLATE
+# The review destination is a plain template over the Place ID, not an API call
+# — nothing here costs a Google request. Lived in the seed module until that was
+# deleted; this is now its only consumer.
+GOOGLE_REVIEW_URL_TEMPLATE = (
+    "https://search.google.com/local/writereview?placeid={place_id}"
+)
 
 # Google place types the sales team actually prospects. Deliberately not
 # Google's full table, most of which is irrelevant (heliport, cemetery), and
@@ -105,7 +110,9 @@ class SearchHit:
     distance_m: int | None
     saved: bool
     merchant_id: UUID | None = None
-    status: str | None = None
+    # The saved row's subscription, if it has one. Carried so the operator can
+    # see from the result list whether a URL they already hold still opens.
+    subscription: object | None = None
 
 
 @dataclass(frozen=True)
@@ -302,8 +309,8 @@ def search(
                 else None
             ),
             saved=place.place_id in saved,
-            merchant_id=saved.get(place.place_id, (None, None))[0],
-            status=saved.get(place.place_id, (None, None))[1],
+            merchant_id=getattr(saved.get(place.place_id), "id", None),
+            subscription=getattr(saved.get(place.place_id), "subscription", None),
         )
         # Google's own ordering is relevance, and it is better at that than a
         # distance sort would be. The distance column is information, not the
@@ -443,7 +450,8 @@ def _insert(db: Session, details: PlaceDetails) -> Merchant:
         google_review_count=details.review_count,
         google_synced_at=now,
         source="GOOGLE_PLACES",
-        status="ACTIVE",
+        # No subscription is written here. Saving a lead is prospecting; the
+        # merchant's URL stays shut until somebody signs them up.
         slug=unique_slug(db, slugify(details.name, details.city)),
     )
     db.add(merchant)
@@ -569,17 +577,20 @@ def replace_context(
     return context
 
 
-def _saved_merchants(
-    db: Session, place_ids: list[str]
-) -> dict[str, tuple[UUID, str]]:
-    """One indexed lookup, served by merchants_google_place_id_idx."""
+def _saved_merchants(db: Session, place_ids: list[str]) -> dict[str, Merchant]:
+    """One indexed lookup, served by merchants_google_place_id_idx.
+
+    The subscription rides along on the same query rather than being lazy-loaded
+    per row: a 20-result page would otherwise issue 20 follow-up selects to
+    render one column.
+    """
     if not place_ids:
         return {}
 
     rows = db.execute(
-        select(Merchant.google_place_id, Merchant.id, Merchant.status).where(
-            Merchant.google_place_id.in_(place_ids)
-        )
-    ).all()
+        select(Merchant)
+        .options(joinedload(Merchant.subscription))
+        .where(Merchant.google_place_id.in_(place_ids))
+    ).scalars().all()
 
-    return {place_id: (id_, status) for place_id, id_, status in rows}
+    return {merchant.google_place_id: merchant for merchant in rows}

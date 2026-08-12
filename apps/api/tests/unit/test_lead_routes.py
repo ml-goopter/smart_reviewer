@@ -143,31 +143,15 @@ def test_criteria_reach_the_service_intact(client, monkeypatch):
 # --- the URL the router itself decides --------------------------------------
 
 
-def test_a_saved_active_row_carries_an_absolute_url(client, monkeypatch):
+def test_a_saved_row_carries_an_absolute_url(client, monkeypatch):
     merchant_id = uuid4()
-    serve(monkeypatch, outcome([
-        hit(saved=True, merchant_id=merchant_id, status="ACTIVE")
-    ]))
+    serve(monkeypatch, outcome([hit(saved=True, merchant_id=merchant_id)]))
 
     result = client.post("/api/leads/search", json=BODY).json()["results"][0]
 
     assert result["saved"] is True
     assert result["url"] == f"https://reviews.example.test/m/{merchant_id}"
     assert result["merchantId"] == str(merchant_id)
-
-
-def test_an_archived_row_is_marked_saved_but_offers_no_url(client, monkeypatch):
-    """Its URL redirects to /unavailable, so handing it over to copy would be
-    handing over a dead link."""
-    serve(monkeypatch, outcome([
-        hit(saved=True, merchant_id=uuid4(), status="ARCHIVED")
-    ]))
-
-    result = client.post("/api/leads/search", json=BODY).json()["results"][0]
-
-    assert result["saved"] is True
-    assert result["status"] == "ARCHIVED"
-    assert result["url"] is None
 
 
 def test_an_unsaved_row_has_no_url(client, monkeypatch):
@@ -268,7 +252,6 @@ def stored(**overrides):
         "category": "Sushi Restaurant",
         "address": "120 No 3 Rd",
         "city": "Richmond",
-        "status": "ACTIVE",
         "website": "https://example.test",
         "google_place_id": "ChIJsushi",
         "google_rating": Decimal("4.2"),
@@ -307,7 +290,6 @@ def test_a_new_merchant_is_201_with_a_copyable_url(saving):
     assert body["created"] is True
     assert body["merchant"]["url"] == f"https://reviews.example.test/m/{merchant.id}"
     assert body["merchant"]["slug"] == "sushi-mura-richmond"
-    assert body["note"] is None
     assert db.commits == 1
 
 
@@ -322,13 +304,14 @@ def test_a_known_merchant_is_200_with_the_same_url(saving):
     assert response.json()["merchant"]["url"].endswith(str(merchant.id))
 
 
-def test_an_archived_merchant_offers_no_url_and_says_why(saving):
-    client, _ = saving((stored(status="ARCHIVED"), False))
+def test_an_existing_merchant_still_gets_its_url(saving):
+    """There is no longer a state in which a saved merchant has no URL."""
+    merchant = stored()
+    client, _ = saving((merchant, False))
 
     body = client.post("/api/leads/merchants", json={"placeId": "ChIJsushi"}).json()
 
-    assert body["merchant"]["url"] is None
-    assert body["note"] == "archived — this URL will not open"
+    assert body["merchant"]["url"].endswith(str(merchant.id))
 
 
 def test_the_slug_is_returned_so_the_operator_knows_it(saving):
@@ -379,7 +362,7 @@ def test_save_accepts_a_place_id_and_nothing_else(saving, body):
 
 
 def test_saved_merchants_are_listed_with_their_urls(client, monkeypatch):
-    rows = [stored(name="Sushi Mura"), stored(name="Pho 37", status="INACTIVE")]
+    rows = [stored(name="Sushi Mura"), stored(name="Pho 37")]
     monkeypatch.setattr(
         lead_service, "saved_merchants", lambda _db, limit, offset: rows
     )
@@ -387,8 +370,10 @@ def test_saved_merchants_are_listed_with_their_urls(client, monkeypatch):
     body = client.get("/api/leads/merchants").json()
 
     assert [m["name"] for m in body["merchants"]] == ["Sushi Mura", "Pho 37"]
-    assert body["merchants"][0]["url"].startswith("https://reviews.example.test/m/")
-    assert body["merchants"][1]["url"] is None
+    assert all(
+        m["url"].startswith("https://reviews.example.test/m/")
+        for m in body["merchants"]
+    )
 
 
 def test_paging_is_passed_through(client, monkeypatch):

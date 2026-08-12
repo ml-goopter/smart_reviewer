@@ -114,7 +114,7 @@ class OneListing:
 
 def merchant(**overrides) -> Merchant:
     defaults = {
-        "name": "Existing", "slug": "existing", "status": "ACTIVE",
+        "name": "Existing", "slug": "existing",
         "google_place_id": "ChIJsushi", "source": "YAML",
     }
     return Merchant(**{**defaults, **overrides})
@@ -145,16 +145,6 @@ def test_a_known_place_id_is_returned_without_touching_google():
     # refresh the MVP defers, arriving through a side door.
     assert provider.details_calls == []
     assert db.added == []
-
-
-def test_an_archived_merchant_is_returned_as_it_stands():
-    """Reactivating would overrule whoever archived it."""
-    existing = merchant(status="ARCHIVED")
-    db = FakeDb(existing=existing)
-
-    saved, created = lead_service.save_merchant(db, OneListing(), "ChIJsushi")
-
-    assert (created, saved.status) == (False, "ARCHIVED")
 
 
 def test_a_curated_merchants_fields_are_never_overwritten():
@@ -339,18 +329,20 @@ def test_google_fields_are_copied_verbatim():
     assert row.google_profile_url == "https://maps.google.com/?cid=1"
 
 
-def test_the_row_is_active_and_marked_as_crawler_sourced():
+def test_the_row_is_marked_as_crawler_sourced_and_left_unsubscribed():
+    """A saved lead is inert: its URL does not open until somebody subscribes
+    it, so nothing here may write a subscription."""
     db = FakeDb()
     lead_service.save_merchant(db, OneListing(), "ChIJsushi")
     row = written(db)
 
-    assert row.status == "ACTIVE"
     assert row.source == "GOOGLE_PLACES"
     assert row.google_synced_at is not None
+    assert not any(type(obj).__name__ == "Subscription" for obj in db.added)
 
 
-def test_the_review_url_matches_what_the_seed_would_derive():
-    from app.seed import GOOGLE_REVIEW_URL_TEMPLATE
+def test_the_review_url_is_derived_from_the_place_id():
+    from app.services.leads import GOOGLE_REVIEW_URL_TEMPLATE
 
     db = FakeDb()
     lead_service.save_merchant(db, OneListing(), "ChIJsushi")
