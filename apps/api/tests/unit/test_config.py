@@ -118,6 +118,23 @@ def test_the_adapters_that_exist_are_accepted(monkeypatch, name):
     assert Settings().lead_provider == name
 
 
+@pytest.mark.parametrize("value", ["Vancouver", "PST", "America/Notatown", ""])
+def test_an_unknown_operator_timezone_stops_the_process(monkeypatch, value):
+    """Every subscription expiry is computed in this zone. An unresolvable one
+    would not surface until somebody subscribed a merchant, where it reads as a
+    broken endpoint rather than a broken setting."""
+    monkeypatch.setenv("OPERATOR_TIMEZONE", value)
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_a_real_iana_zone_is_accepted(monkeypatch):
+    monkeypatch.setenv("OPERATOR_TIMEZONE", "Europe/Berlin")
+
+    assert Settings().operator_timezone == "Europe/Berlin"
+
+
 @requires_repo
 def test_the_search_budget_stays_under_the_proxy_that_actually_fronts_it():
     """The budget is only meaningful against nginx's real proxy_read_timeout;
