@@ -29,7 +29,13 @@ const SAVED_MERCHANT = {
   id: 'e2b1f6a4-0f6d-4a2e-9c3e-0d3d9a1f0c11',
   name: 'Sushi Mura',
   slug: 'sushi-mura-richmond',
-  status: 'ACTIVE',
+  subscription: {
+    status: 'ACTIVE' as const,
+    expiresAt: '2026-09-12T07:00:00Z',
+    lastValidDay: '2026-09-11',
+    duration: 30,
+    durationUnit: 'day',
+  },
   url: 'https://reviews.example.test/m/e2b1f6a4-0f6d-4a2e-9c3e-0d3d9a1f0c11',
   category: null,
   address: null,
@@ -55,7 +61,7 @@ function result(overrides: Partial<LeadSearchResponse['results'][number]> = {}) 
     website: null,
     saved: false,
     merchantId: null,
-    status: null,
+    subscription: null,
     url: null,
     ...overrides,
   }
@@ -466,37 +472,44 @@ describe('saving', () => {
       path.includes('/categories')
         ? reply(CATEGORIES)
         : reply({
-            created: false,
-            // Deliberately not the sentence the server really sends. The note
-            // is prose, and prose from the API cannot be translated — so what
-            // is shown is built here, from the status beside it. Echoing this
-            // back would put an English line under a Chinese header.
-            note: 'the server worded this itself',
-            merchant: { ...SAVED_MERCHANT, status: 'ARCHIVED', url: null },
+            created: true,
+            merchant: { ...SAVED_MERCHANT, subscription: null },
           }),
     )
     await click('Save')
 
-    expect(await screen.findByText(/archived — this URL will not open/)).toBeTruthy()
-    expect(screen.queryByText(/the server worded this itself/)).toBeNull()
+    // The normal outcome of a save: the row exists, the URL exists, and
+    // neither opens until somebody subscribes it. The sentence is built here
+    // rather than echoed from the API, which sends no prose — one from the
+    // server would be an English line under a Chinese header.
+    expect(
+      await screen.findByText(/not subscribed — this URL will not open until it is/),
+    ).toBeTruthy()
   })
 
-  it('offers no URL for a merchant whose status has none', async () => {
+  it('marks a saved but unsubscribed row, and still offers its URL', async () => {
     fetchMock.mockImplementation((path: string) =>
       path.includes('/categories')
         ? reply(CATEGORIES)
         : reply(
             response({
               results: [
-                result({ saved: true, merchantId: 'x', status: 'ARCHIVED', url: null }),
+                result({
+                  saved: true,
+                  merchantId: 'x',
+                  subscription: null,
+                  url: 'https://reviews.example.test/m/x',
+                }),
               ],
             }),
           ),
     )
     await runValidSearch()
 
-    expect(await screen.findByText('ARCHIVED · no URL')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Copy URL' })).toBeNull()
+    // The URL is derived from the merchant id and always exists; whether it
+    // opens is the subscription's answer, shown beside it.
+    expect(await screen.findByText('not subscribed')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copy URL' })).toBeTruthy()
   })
 })
 
@@ -556,6 +569,25 @@ describe('the saved list', () => {
       return reply(response())
     })
   }
+
+  it('shows the subscription but does not let a row change it', async () => {
+    listing(1, 0)
+    render(<LeadCrawler onEdit={() => {}} />)
+    await clickTab('Saved')
+    await screen.findByText('Merchant 0')
+
+    // The state is worth seeing at a glance — it is the only place a lapsing
+    // subscription becomes visible at all.
+    expect(screen.getByText('ACTIVE')).toBeTruthy()
+    // Day, month and year, ordered by the locale rather than by us — asserting a
+    // literal string here would pin en-US's ordering as if it were the format.
+    expect(screen.getByText(/Expires\b.*\b11\b.*2026/)).toBeTruthy()
+
+    // Acting on it belongs to the merchant's own page.
+    expect(screen.queryByRole('button', { name: /Renew/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Suspend' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
+  })
 
   it('reaches merchants past the first page', async () => {
     listing(50, 1)
@@ -693,6 +725,82 @@ describe('the context editor', () => {
     render(<ContextEditor merchantId={MERCHANT.id} onBack={() => {}} />)
     await screen.findByText('Pho 37')
   }
+
+  // --- the subscription card ------------------------------------------------
+  //
+  // These controls live here rather than on the saved list: changing a
+  // subscription is a deliberate act with money behind it, not something to do
+  // by mis-tapping one row of a fifty-row table.
+
+  function subscriptionReplies(subscription: unknown) {
+    const calls: RequestInit[] = []
+    fetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.includes('/subscription')) {
+        calls.push(init!)
+        return reply({
+          status: 'ACTIVE',
+          expiresAt: '2026-09-12T07:00:00Z',
+          lastValidDay: '2026-09-11',
+          duration: 21,
+          durationUnit: 'day',
+        })
+      }
+      return reply({
+        merchant: { ...MERCHANT, subscription },
+        context: CONTEXT,
+      })
+    })
+    return calls
+  }
+
+  it('renews for the default term, and says how many days that is', async () => {
+    const calls = subscriptionReplies(SAVED_MERCHANT.subscription)
+    await openEditor()
+
+    await click('Renew 21 days')
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.method).toBe('POST')
+    expect(JSON.parse(calls[0]!.body as string)).toEqual({
+      duration: 21,
+      durationUnit: 'day',
+    })
+  })
+
+  it('offers Subscribe rather than Renew when there is no subscription', async () => {
+    subscriptionReplies(null)
+    await openEditor()
+
+    expect(screen.getByRole('button', { name: 'Subscribe 21 days' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Renew/ })).toBeNull()
+    // Nothing to suspend yet.
+    expect(screen.queryByRole('button', { name: 'Suspend' })).toBeNull()
+  })
+
+  it('suspends through PATCH, which is a different call from renewing', async () => {
+    const calls = subscriptionReplies(SAVED_MERCHANT.subscription)
+    await openEditor()
+
+    await click('Suspend')
+
+    expect(calls[0]!.method).toBe('PATCH')
+    expect(JSON.parse(calls[0]!.body as string)).toEqual({ status: 'CANCELLED' })
+  })
+
+  it('offers Resume, not Suspend, once it is cancelled', async () => {
+    subscriptionReplies({
+      ...SAVED_MERCHANT.subscription,
+      status: 'CANCELLED',
+    })
+    await openEditor()
+
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Suspend' })).toBeNull()
+    // Renew is still offered — a term can be extended while suspended — so the
+    // note has to say that doing so will not reopen the URL.
+    expect(screen.getByRole('button', { name: 'Renew 21 days' })).toBeTruthy()
+    expect(screen.getByText(/only Resume reopens the URL/)).toBeTruthy()
+  })
 
   it('loads the current values one per line', async () => {
     loaded()
