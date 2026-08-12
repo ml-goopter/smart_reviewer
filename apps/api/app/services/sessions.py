@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.errors import ApiError
 from app.models import Merchant, SmartReviewSession, SmartReviewSuggestion
 from app.services import events
+from app.services.subscription_terms import is_active
 
 # 32 bytes of entropy, urlsafe-encoded to 43 characters. The column allows 64.
 TOKEN_BYTES = 32
@@ -52,10 +53,23 @@ def create_session(db: Session, merchant_id: UUID, client_ip: str) -> SmartRevie
     if merchant is None:
         raise ApiError(404, "merchant_not_found")
 
-    # One status for every reason a merchant cannot be reviewed. The public UI
-    # must not reveal whether a business is inactive, archived, or simply never
-    # finished setup — that is the merchant's private business information.
-    if merchant.status != "ACTIVE" or not merchant.google_review_url:
+    # Misconfigured rather than switched off: without this the customer would
+    # reach the reviewer and then a dead end where Google should be.
+    if not merchant.google_review_url:
+        raise ApiError(409, "merchant_unavailable")
+
+    # Whether the merchant is paid up. Checked here and nowhere else: expiry is
+    # a clock running out at midnight, not somebody deliberately switching a
+    # merchant off, so enforcing it per request would delete the review a
+    # customer was typing at 23:59:58. A session, once minted, runs to its own
+    # expiry; the exposure is bounded by SESSION_TTL_HOURS.
+    #
+    # No subscription at all is the same as an expired one. A gate that passes
+    # when its data is missing is not a gate.
+    subscription = merchant.subscription
+    if subscription is None or not is_active(
+        subscription.status, subscription.expires_at, datetime.now(UTC)
+    ):
         raise ApiError(409, "merchant_unavailable")
 
     ip_hash = hash_ip(client_ip)
@@ -98,11 +112,13 @@ def load_valid_session(db: Session, token: str) -> SmartReviewSession:
     if session.expires_at <= datetime.now(UTC):
         raise ApiError(410, "session_unavailable")
 
-    # Re-checked on every request, not only at creation. Without this, taking a
-    # merchant offline leaves up to a full TTL of live sessions that keep
-    # spending AI money and then hand the customer an empty Google URL.
+    # Re-checked on every request, not only at creation: a merchant that loses
+    # its review URL mid-session would otherwise keep spending AI money and
+    # then hand the customer an empty Google URL.
+    #
+    # The subscription is deliberately NOT re-checked here — see create_session.
     merchant = session.merchant
-    if merchant.status != "ACTIVE" or not merchant.google_review_url:
+    if not merchant.google_review_url:
         raise ApiError(410, "session_unavailable")
 
     return session

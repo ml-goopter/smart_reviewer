@@ -194,18 +194,10 @@ def test_complete_on_expired_session_is_410(api, merchant, db):
 
 
 
-def test_deactivated_merchant_closes_its_live_sessions(api, merchant, db):
-    """Without re-validation, taking a merchant offline leaves a full TTL of
-    sessions that keep spending AI money and then hand the customer an empty
-    Google URL."""
-    token = api.post(CREATE, json={"merchantId": str(merchant.id)}).json()["token"]
-    assert api.get(f"{CREATE}/{token}").status_code == 200
-
-    merchant.status = "INACTIVE"
-    db.flush()
-
-    assert api.get(f"{CREATE}/{token}").status_code == 410
-    assert api.post(f"{CREATE}/{token}/suggestions").status_code == 410
+# A companion test asserting that setting merchant.status = INACTIVE closed
+# live sessions was removed with the column: availability is now the
+# subscription's job, and it is checked once at creation rather than per
+# request. tests/integration/test_subscription_gate.py holds that boundary.
 
 
 def test_merchant_losing_its_google_url_closes_live_sessions(api, merchant, db):

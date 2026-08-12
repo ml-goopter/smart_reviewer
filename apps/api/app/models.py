@@ -23,7 +23,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 # Status and event vocabularies are varchar + CHECK rather than native Postgres
 # enums: adding a value to a PG enum needs its own migration and cannot be done
 # inside a transaction on older versions, whereas a CHECK is a one-line ALTER.
-MERCHANT_STATUSES = ("ACTIVE", "INACTIVE", "ARCHIVED")
+#
+# Merchants have no status of their own. Whether one can be reviewed is answered
+# by its subscription and nothing else — two independent notions of "switched
+# off" is one too many, and the suspension states live on SUBSCRIPTION_STATUSES.
 
 # How the row got here, not how good its data is. Seeding is the only path that
 # predates the lead crawler, so 'YAML' is the default and every existing row is
@@ -129,15 +132,8 @@ class Merchant(Base):
     google_review_count: Mapped[int | None] = mapped_column(Integer)
     google_synced_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
-    # Server defaults, not just Python-side ones, so a psql fixup or any future
-    # non-ORM insert path cannot produce a NOT NULL violation on a column the
-    # spec documents as having a default.
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default=text("'ACTIVE'"), default="ACTIVE"
-    )
-
-    # Stable identifier for the seed script to upsert on. Not exposed publicly;
-    # the QR code carries the uuid so merchant ids stay opaque.
+    # Human-readable and unique. Not exposed publicly; the QR code carries the
+    # uuid so merchant ids stay opaque.
     slug: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
 
     source: Mapped[str] = mapped_column(
@@ -165,9 +161,6 @@ class Merchant(Base):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            _in_clause("status", MERCHANT_STATUSES), name="ck_merchants_status"
-        ),
         CheckConstraint(
             _in_clause("source", MERCHANT_SOURCES), name="ck_merchants_source"
         ),
