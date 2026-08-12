@@ -121,15 +121,6 @@ def test_expired_session_is_410(client, merchant, db):
     assert client.get(f"{CREATE}/{token}").status_code == 410
 
 
-def test_disabled_session_is_410(client, merchant, db):
-    token = _create(client, merchant).json()["token"]
-    session = db.scalars(select(SmartReviewSession)).one()
-    session.disabled_at = datetime.now(UTC)
-    db.flush()
-
-    assert client.get(f"{CREATE}/{token}").status_code == 410
-
-
 def test_completed_session_remains_usable(client, merchant, db):
     """Completion is a milestone, not a gate. A customer who reaches Google and
     presses back must find their session and their edited text still there."""

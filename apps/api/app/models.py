@@ -36,7 +36,13 @@ MERCHANT_SOURCES = ("YAML", "GOOGLE_PLACES")
 # No EXPIRED: expires_at is authoritative and evaluated on every read, and with
 # no background job nothing would ever write that row state. A session that has
 # passed its expiry is simply one whose expires_at is in the past.
-SESSION_STATUSES = ("ACTIVE", "COMPLETED", "DISABLED")
+#
+# No DISABLED either. It paired with a `disabled_at` kill switch that nothing
+# ever pulled: at a 24-hour TTL a session worth killing has already expired, and
+# the thing an operator wants to switch off is a merchant, which is the
+# subscription's job. A gate with no lever reads as a capability the product
+# has, so the next person to want one assumes it works.
+SESSION_STATUSES = ("ACTIVE", "COMPLETED")
 
 # The two ways a merchant can be switched off with time still on the clock.
 # Neither moves expires_at: suspension closes the gate and the term keeps
@@ -313,7 +319,6 @@ class SmartReviewSession(Base):
     expires_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False
     )
-    disabled_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     first_opened_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     last_opened_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))

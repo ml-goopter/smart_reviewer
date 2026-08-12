@@ -106,9 +106,6 @@ def load_valid_session(db: Session, token: str) -> SmartReviewSession:
     if session is None:
         raise ApiError(404, "session_not_found")
 
-    if session.disabled_at is not None:
-        raise ApiError(410, "session_unavailable")
-
     if session.expires_at <= datetime.now(UTC):
         raise ApiError(410, "session_unavailable")
 
