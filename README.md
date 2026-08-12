@@ -8,12 +8,15 @@ the merchant's official Google review page with the text on their clipboard.
 ## Running locally
 
 ```bash
-cp .env.example .env                                        # fill in the secrets
-(cd apps/web && npm install && npm run build)               # dist/ is gitignored
-docker compose up -d                                        # migrates, then starts
-docker compose exec api python -m app.seed merchants/*.yaml # load merchants
-open http://localhost:8080
+cp .env.example .env                           # fill in the secrets
+(cd apps/web && npm install && npm run build)  # dist/ is gitignored
+docker compose up -d                           # migrates, then starts
+open http://localhost:8080/leads               # find a merchant, save, subscribe
 ```
+
+**Merchants come from the lead crawler**, at `/leads`. Search Google Places,
+save a listing, then subscribe it — a saved merchant's URL does not open until
+it has an active subscription. There is no seed script and no YAML.
 
 **Build the frontend before the first `up`.** nginx serves `apps/web/dist` from
 a bind mount and `dist/` is gitignored, so on a fresh clone it does not exist —
@@ -62,10 +65,9 @@ Regenerating `.env.example` needs `docker compose restart api` afterwards: it is
 a single-file bind mount, and the running container keeps serving the old
 inode — so the drift test fails against a file you just fixed.
 
-Seeding is for demo merchants. It prints each merchant's permanent
-`/m/:merchantId` URL, which is what goes into the QR code, and upserts on
-`slug`, so editing a demo merchant means editing its YAML and running it again.
-Real merchants arrive through the lead crawler below.
+`OPERATOR_TIMEZONE` decides the calendar subscriptions expire on. A term runs to
+midnight at the end of a day, and which instant that is depends on a zone — in
+UTC a Richmond merchant would go dark at 5pm on their last day.
 
 ## Lead crawler
 
@@ -77,8 +79,9 @@ LEAD_PROVIDER=fake docker compose up -d api   # no Google account needed
 open http://localhost:8080/leads
 ```
 
-A saved lead is a row in the same `merchants` table, `ACTIVE`, with its review
-URL derived from the Place ID — so the URL it hands you works immediately.
+A saved lead is a row in the same `merchants` table, with its review URL derived
+from the Place ID. That URL does **not** open until the merchant is subscribed —
+saving is prospecting, subscribing is signing them up.
 `merchant_review_context` is auto-filled from the listing's editorial summary
 and attributes and marked approved, which makes a fresh lead demo with
 grounding rather than with the generic fallback. What Places has no field for —
@@ -89,7 +92,7 @@ products, menu items, keywords, custom instructions — is typed in the editor a
 nginx proxies all of `/api/*` and the API is published on `:8000`, so anyone who
 can reach the host can search (spending your Google quota) and save. The ceiling
 is the per-day quota on the key, not the application — set one, restrict the key
-to Places and Geocoding, and add a billing alert. `MVP-SPEC/lead-crawler-spec.md`
+to Places and Geocoding, and add a billing alert. `SPECS/lead-crawler-spec.md`
 §2.1.12 records this as an accepted risk with what closing it later costs.
 
 Two Google filters do not exist: there is no rating *ceiling* and no review-count
@@ -207,11 +210,10 @@ apps/api/     FastAPI · SQLAlchemy · Alembic · provider adapters
 apps/web/     Vite · React · TypeScript · plain CSS
 nginx/        reverse proxy + static serving config
 mockups/      accepted visual direction, screen by screen
-merchants/    per-merchant YAML, loaded by the seed script
-MVP-SPEC/     requirements — DECISIONS.md is authoritative
+SPECS/        requirements — DECISIONS.md is authoritative
 ```
 
-`MVP-SPEC/DECISIONS.md` records the sixteen decisions the build is based on and
+`SPECS/DECISIONS.md` records the decisions the build is based on and
 lists where the four original spec documents are superseded. Read it before the
 others; they contradicted each other in several places and those contradictions
 were resolved deliberately, not by accident.
