@@ -44,7 +44,7 @@ function failureOf(error: unknown): Failure {
  *  sentence — same reason as `Failure`. */
 type Notice =
   | { kind: 'already-saved'; name: string }
-  | { kind: 'will-not-open'; name: string; status: string }
+  | { kind: 'not-subscribed'; name: string }
 
 function distance(units: Messages['leads']['search'], metres: number | null): string {
   if (metres === null) return '—'
@@ -177,19 +177,13 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
     setNotice(null)
     try {
       const saved = await saveMerchant(result.placeId)
-      // `created` and `note` are the whole difference between a fresh save and
-      // one that found an existing row — including an archived one, whose URL
-      // will not open. Neither is visible in the patched row.
-      // The server's own `note` is prose, and it is derived from the status
-      // alone — so the status is kept and the sentence written here, rather
-      // than putting an English line under a Chinese header.
+      // Neither fact is visible in the patched row: that it was already saved,
+      // and that its URL does not open yet. A newly saved merchant is never
+      // subscribed, so the second notice is the normal outcome of a save — it
+      // is the operator's cue that saving is prospecting, not signing up.
       setNotice(
-        saved.note != null
-          ? {
-            kind: 'will-not-open',
-            name: saved.merchant.name,
-            status: saved.merchant.status,
-          }
+        saved.merchant.subscription == null
+          ? { kind: 'not-subscribed', name: saved.merchant.name }
           : saved.created
             ? null
             : { kind: 'already-saved', name: saved.merchant.name },
@@ -207,7 +201,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
                   ...row,
                   saved: true,
                   merchantId: saved.merchant.id,
-                  status: saved.merchant.status,
+                  subscription: saved.merchant.subscription,
                   url: saved.merchant.url,
                 }
                 : row,
@@ -347,7 +341,7 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
           <p className="lead-warning">
             {notice.kind === 'already-saved'
               ? t.alreadySaved(notice.name)
-              : t.willNotOpen(notice.name, notice.status)}
+              : t.notSubscribed(notice.name)}
           </p>
         )}
       </div>
@@ -420,11 +414,13 @@ export function SearchPanel({ onEdit }: { onEdit: (merchantId: string) => void }
                   {result.saved ? (
                     <>
                       <span className="lead-badge">{t.savedBadge}</span>
-                      {result.url === null ? (
-                        <span className="lead-sub">
-                          {result.status} · {leads.noUrl}
-                        </span>
-                      ) : (
+                      {/* The URL always exists for a saved row; whether it
+                          opens is the subscription's answer, so that is what
+                          is shown beside it. */}
+                      {result.subscription == null && (
+                        <span className="lead-sub">{leads.subscription.notSubscribed}</span>
+                      )}
+                      {result.url !== null && (
                         <CopyButton url={result.url} label={leads.copyUrl} />
                       )}
                       {result.merchantId !== null && (
