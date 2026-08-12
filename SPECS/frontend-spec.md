@@ -262,8 +262,8 @@ FastAPI redirects to `/unavailable` when:
 
 ```text id="wfl6un"
 merchantId does not exist
-merchant is inactive
-merchant is archived
+merchant has no subscription
+merchant's subscription has expired or been suspended
 merchant cannot receive reviews
 ```
 
@@ -279,7 +279,7 @@ Please ask the business for assistance.
 Do not expose:
 
 ```text id="hhztjv"
-Merchant database status
+Merchant subscription state — expired, cancelled, or never subscribed
 Database errors
 Internal validation details
 Stack traces

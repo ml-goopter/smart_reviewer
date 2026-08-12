@@ -110,6 +110,7 @@ Keep everything in **one monolith service**.
 ```text
 merchants
 merchant_review_context
+subscriptions
 smart_review_sessions
 smart_review_suggestions
 smart_review_events
@@ -125,18 +126,37 @@ name
 category
 description
 google_review_url
-status
 created_at
 ```
+
+There is no `status` column — DECISIONS.md R17.
 
 Rule:
 
 ```text
 Session can only be created if:
 - merchant exists
-- status = ACTIVE
 - google_review_url exists
+- subscription exists AND status = ACTIVE AND now < expires_at
 ```
+
+---
+
+## 6.1 Subscription Model
+
+```text
+id
+merchant_id        ← unique, one per merchant
+status             ← ACTIVE | CANCELLED | PAUSED
+expires_at         ← persisted, never recalculated on read
+duration
+duration_unit      ← day | month | year; only day is implemented
+created_at
+updated_at
+```
+
+Checked at session creation only, not on every token request. See
+`data-models.md` §6 for the term arithmetic and DECISIONS.md R17–R20 for why.
 
 ---
 
@@ -167,7 +187,7 @@ Removed token hashing entirely.
 id
 merchant_id
 token              ← plain text
-status             ← ACTIVE | COMPLETED | EXPIRED
+status             ← ACTIVE | COMPLETED   (no EXPIRED — R7; no DISABLED — R7b)
 created_at
 expires_at
 
@@ -211,10 +231,15 @@ token lookup
 find session WHERE token = ?
    ↓
 check:
-   - status == ACTIVE
    - expires_at > now
-   - merchant valid
+   - merchant still has google_review_url
 ```
+
+Session `status` is **not** checked — completion is a milestone, not a gate
+(DECISIONS.md R7). There is no `disabled_at`: a per-session kill switch had no
+lever and no use case at a 24-hour TTL (R7b). Neither is the subscription
+checked here — it is checked once, at session creation, so a customer mid-review
+is never cut off at midnight (R17).
 
 ---
 
@@ -250,7 +275,8 @@ redirects. The frontend never creates sessions.
 302 → /r/{token}        Cache-Control: no-store
 ```
 
-Merchant unknown, inactive, archived, or missing `google_review_url`:
+Merchant unknown, not subscribed, expired, suspended, or missing
+`google_review_url`:
 
 ```text
 302 → /unavailable      Cache-Control: no-store
