@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react'
 
 import { useLocale, useMessages } from '../../lib/i18n/context'
-import { LeadFailure, fetchContext, putContext } from '../../lib/leadsApi'
-import type { MerchantContext, ReviewContext } from '../../lib/leadTypes'
+import {
+  DEFAULT_TERM_DAYS,
+  LeadFailure,
+  fetchContext,
+  putContext,
+  setSubscriptionStatus,
+  subscribe,
+} from '../../lib/leadsApi'
+import type { MerchantContext, ReviewContext, Subscription } from '../../lib/leadTypes'
 import { TopBar } from '../TopBar'
 import { CopyButton } from './CopyButton'
 
@@ -107,6 +114,19 @@ function Field({
   )
 }
 
+/** `lastValidDay` is a plain `YYYY-MM-DD` already resolved in the operator's
+ *  timezone. Parsed as UTC noon rather than handed to `new Date()` directly: a
+ *  bare date string parses as UTC midnight, which in any negative-offset zone
+ *  renders as the day before — the exact off-by-one the field exists to stop. */
+function lastDay(isoDate: string, locale: string): string {
+  const [y = 0, m = 1, d = 1] = isoDate.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString(locale, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 export function ContextEditor({
   merchantId,
   onBack,
@@ -116,6 +136,7 @@ export function ContextEditor({
 }) {
   const leads = useMessages().leads
   const t = leads.editor
+  const sub = leads.subscription
   // A date under a Chinese header should not be formatted for whatever the
   // machine happens to be set to.
   const { locale } = useLocale()
@@ -128,6 +149,11 @@ export function ContextEditor({
    * below must not depend on the catalogue, or every language change would
    * refetch the merchant. */
   const [error, setError] = useState<'load' | 'save' | 'link' | null>(null)
+  /* Subscription writes are tracked apart from the context form: they are a
+   * different request against a different endpoint, and a failed renewal must
+   * not read as a failed save of the text the operator just typed. */
+  const [subBusy, setSubBusy] = useState(false)
+  const [subError, setSubError] = useState(false)
 
   useEffect(() => {
     fetchContext(merchantId)
@@ -143,6 +169,25 @@ export function ContextEditor({
   function edit(field: keyof FormText, value: string) {
     setForm((current) => ({ ...current, [field]: value }))
     setStatus((current) => (current === 'saved' ? 'idle' : current))
+  }
+
+  /* Patches the loaded merchant from the response rather than refetching: the
+   * operator may have unsaved context text in the form below, and a refetch
+   * would reset it under them. */
+  function writeSubscription(call: () => Promise<Subscription>) {
+    if (subBusy) return
+    setSubBusy(true)
+    setSubError(false)
+    call()
+      .then((subscription) => {
+        setLoaded((current) =>
+          current === null
+            ? current
+            : { ...current, merchant: { ...current.merchant, subscription } },
+        )
+      })
+      .catch(() => setSubError(true))
+      .finally(() => setSubBusy(false))
   }
 
   async function submit(event: React.FormEvent) {
@@ -209,7 +254,10 @@ export function ContextEditor({
       <div className="lead-card">
         <h2 className="lead-heading">{loaded.merchant.name}</h2>
         <p className="lead-sub">
-          {loaded.merchant.slug} · {loaded.merchant.status}
+          {loaded.merchant.slug} ·{' '}
+          {loaded.merchant.subscription == null
+            ? sub.notSubscribed
+            : loaded.merchant.subscription.status}
           {loaded.merchant.googleRating !== null && (
             <>
               {' · '}
@@ -229,6 +277,77 @@ export function ContextEditor({
         {loaded.merchant.url !== null && (
           <p className="lead-url">
             <code>{loaded.merchant.url}</code> <CopyButton url={loaded.merchant.url} />
+          </p>
+        )}
+      </div>
+
+      {/* The subscription is what decides whether the URL above opens, so it
+          sits directly under it. Not in the form below: that one replaces eight
+          context fields on submit, and a term is not a draft to be saved. */}
+      <div className="lead-card">
+        <h3 className="lead-heading">{sub.heading}</h3>
+
+        <p className="lead-sub">
+          {loaded.merchant.subscription == null ? (
+            sub.notSubscribed
+          ) : (
+            <>
+              {loaded.merchant.subscription.status} · {sub.expires}{' '}
+              {lastDay(loaded.merchant.subscription.lastValidDay, locale)}
+            </>
+          )}
+        </p>
+
+        <div className="lead-actions">
+          <button
+            type="button"
+            className="lead-btn lead-btn--quiet"
+            disabled={subBusy}
+            onClick={() => writeSubscription(() => subscribe(merchantId))}
+          >
+            {loaded.merchant.subscription == null
+              ? sub.subscribe(DEFAULT_TERM_DAYS)
+              : sub.renew(DEFAULT_TERM_DAYS)}
+          </button>
+
+          {loaded.merchant.subscription != null &&
+            (loaded.merchant.subscription.status === 'ACTIVE' ? (
+              <button
+                type="button"
+                className="lead-btn lead-btn--quiet"
+                disabled={subBusy}
+                onClick={() =>
+                  writeSubscription(() =>
+                    setSubscriptionStatus(merchantId, 'CANCELLED'),
+                  )
+                }
+              >
+                {sub.suspend}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="lead-btn lead-btn--quiet"
+                disabled={subBusy}
+                onClick={() =>
+                  writeSubscription(() => setSubscriptionStatus(merchantId, 'ACTIVE'))
+                }
+              >
+                {sub.resume}
+              </button>
+            ))}
+        </div>
+
+        <p className="lead-note">
+          {loaded.merchant.subscription != null &&
+          loaded.merchant.subscription.status !== 'ACTIVE'
+            ? sub.suspendedNote
+            : sub.renewNote}
+        </p>
+
+        {subError && (
+          <p className="lead-error" role="alert">
+            {sub.failed}
           </p>
         )}
       </div>
