@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -34,6 +34,16 @@ MERCHANT_SOURCES = ("YAML", "GOOGLE_PLACES")
 # no background job nothing would ever write that row state. A session that has
 # passed its expiry is simply one whose expires_at is in the past.
 SESSION_STATUSES = ("ACTIVE", "COMPLETED", "DISABLED")
+
+# The two ways a merchant can be switched off with time still on the clock.
+# Neither moves expires_at: suspension closes the gate and the term keeps
+# running, so resuming is a status change and nothing else.
+SUBSCRIPTION_STATUSES = ("ACTIVE", "CANCELLED", "PAUSED")
+
+# Wider than what is implemented, deliberately: the schema accepts months and
+# years so adding them later is not a migration, while the API refuses them
+# until the calendar arithmetic exists.
+DURATION_UNITS = ("day", "month", "year")
 
 # The languages a suggestion may be written in, and the only values the API
 # accepts. BCP-47 tags, matching the locales the web app serves — they are
@@ -143,6 +153,17 @@ class Merchant(Base):
     )
     archived_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
+    # Zero or one. Absent is a meaningful state — never subscribed — and is
+    # treated exactly like an expired one at the gate.
+    #
+    # passive_deletes is not optional here: the FK is ON DELETE CASCADE, and
+    # without this SQLAlchemy loads the child on delete and tries to NULL its
+    # merchant_id first, which the NOT NULL constraint rejects. Deleting a
+    # merchant through the ORM would fail outright.
+    subscription: Mapped["Subscription | None"] = relationship(
+        back_populates="merchant", uselist=False, passive_deletes=True
+    )
+
     __table_args__ = (
         CheckConstraint(
             _in_clause("status", MERCHANT_STATUSES), name="ck_merchants_status"
@@ -158,6 +179,85 @@ class Merchant(Base):
             unique=True,
             postgresql_where=text("google_place_id IS NOT NULL"),
         ),
+    )
+
+
+class Subscription(Base):
+    """How long a merchant's review link stays usable.
+
+    One row per merchant, mutated in place — renewal moves `expires_at` rather
+    than inserting, so `created_at` means "first ever subscribed" and
+    `duration`/`duration_unit` describe only the most recent term. There is no
+    billing or dispute process for a history table to serve.
+
+    `expires_at` is written when the term is set and never recalculated on read.
+    It names the first *dead* midnight, so the gate is `now < expires_at` and
+    the merchant's last usable day is the day before it — see
+    app.services.subscription_terms.
+    """
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    merchant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("merchants.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'ACTIVE'"), default="ACTIVE"
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    duration: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_unit: Mapped[str] = mapped_column(String(10), nullable=False)
+
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    merchant: Mapped["Merchant"] = relationship(back_populates="subscription")
+
+    @property
+    def last_valid_day(self) -> "date":
+        """The last day this merchant's link works, in the operator's zone.
+
+        A property rather than a column: it is a rendering of `expires_at`, and
+        storing it would be a second copy to keep in step. It lives on the model
+        rather than only in the service because every response that shows an
+        expiry must show this instead — `expires_at` names the first *dead*
+        midnight, so displaying it raw credits the merchant a day they do not
+        have, and a helper somebody has to remember to call is one they will
+        eventually forget.
+        """
+        from zoneinfo import ZoneInfo
+
+        from app.config import get_settings
+        from app.services.subscription_terms import last_valid_day
+
+        return last_valid_day(
+            self.expires_at, ZoneInfo(get_settings().operator_timezone)
+        )
+
+    __table_args__ = (
+        CheckConstraint(
+            _in_clause("status", SUBSCRIPTION_STATUSES),
+            name="ck_subscriptions_status",
+        ),
+        # The unit vocabulary is wider than what is implemented, so the schema
+        # never needs revisiting to add months. The API refuses the rest.
+        CheckConstraint(
+            _in_clause("duration_unit", DURATION_UNITS),
+            name="ck_subscriptions_duration_unit",
+        ),
+        CheckConstraint("duration > 0", name="ck_subscriptions_duration_positive"),
     )
 
 
