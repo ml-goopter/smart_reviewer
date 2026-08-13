@@ -24,10 +24,10 @@ export type LeadResult = {
   website: string | null
   saved: boolean
   merchantId: string | null
-  status: string | null
-  /** Present only for a saved ACTIVE merchant. Every other status redirects
-   *  to /unavailable, so there is nothing worth copying. */
+  /** Always present for a saved row: it is derived from the merchant id and
+   *  exists whether or not it currently opens. */
   url: string | null
+  subscription: Subscription | null
 }
 
 export type LeadSearchResponse = {
@@ -50,7 +50,6 @@ export type SavedMerchant = {
   category: string | null
   address: string | null
   city: string | null
-  status: string
   website: string | null
   googlePlaceId: string | null
   googleRating: number | null
@@ -58,12 +57,28 @@ export type SavedMerchant = {
   googleSyncedAt: string | null
   createdAt: string
   url: string | null
+  /** Null when the merchant has never been subscribed — not an object of
+   *  nulls. Until it exists the merchant's URL does not open. */
+  subscription: Subscription | null
+}
+
+export type SubscriptionStatus = 'ACTIVE' | 'CANCELLED' | 'PAUSED'
+
+export type Subscription = {
+  status: SubscriptionStatus
+  /** The first *dead* midnight, in UTC. Do not render this: use lastValidDay,
+   *  or the merchant is credited a day they do not have. */
+  expiresAt: string
+  /** `YYYY-MM-DD`, already resolved in the operator's timezone server-side —
+   *  the browser does not know that zone, so it cannot compute this itself. */
+  lastValidDay: string
+  duration: number
+  durationUnit: string
 }
 
 export type SaveMerchantResponse = {
   created: boolean
   merchant: SavedMerchant
-  note: string | null
 }
 
 export type ReviewContext = {

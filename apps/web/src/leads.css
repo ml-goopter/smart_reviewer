@@ -280,12 +280,15 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
-  padding: 10px 12px;
+  padding: 11px 14px;
   background: var(--surface-2);
 }
 
 .lead-table td {
-  padding: 11px 12px;
+  /* Roomier vertically than horizontally: two of these columns stack a name
+   * over a detail line, so the row's height is set by the pair and needs to
+   * clear the borders above and below rather than sit against them. */
+  padding: 14px;
   border-top: 1px solid var(--border);
   vertical-align: middle;
   /* Merchant names and addresses come from Google and are unbounded. */
@@ -295,20 +298,44 @@
 .lead-name {
   display: block;
   font-weight: 600;
+  line-height: 1.35;
 }
 
 .lead-sub {
   display: block;
   font-size: 12.5px;
+  line-height: 1.45;
   color: var(--muted);
+}
+
+/* The gap that makes a stacked pair read as one cell rather than two rows.
+ * Only between the two — a .lead-sub standing alone needs no offset. */
+.lead-name + .lead-sub {
+  margin-top: 3px;
 }
 
 .lead-actions {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+/* The two fixed-shape columns keep their values on one line. No explicit
+ * widths: auto table layout already gives the merchant name the slack, and
+ * collapsing a cell that contains a flex row makes its buttons overflow back
+ * across the column beside it. */
+.lead-table--saved td:nth-child(2) .lead-sub,
+.lead-table--saved th:nth-child(3),
+.lead-table--saved td:nth-child(3) {
+  white-space: nowrap;
+}
+
+/* Two short buttons; wrapping them stacks the cell and drags the row's height
+ * out of step with its neighbours. */
+.lead-table--saved .lead-actions {
+  flex-wrap: nowrap;
 }
 
 .lead-badge {

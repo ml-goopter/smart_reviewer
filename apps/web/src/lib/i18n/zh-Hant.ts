@@ -179,19 +179,32 @@ export const zhHant: Messages = {
       save: '儲存',
       saving: '儲存中…',
       alreadySaved: (name: string) => `${name} 先前已儲存，現有資料未變更。`,
-      willNotOpen: (name: string, status: string) =>
-        `${name}：狀態為 ${status}，此網址無法開啟`,
+      notSubscribed: (name: string) =>
+        `${name}：尚未訂閱，訂閱後此網址才能開啟`,
     },
 
     saved: {
       merchant: '商戶',
-      status: '狀態',
+      subscription: '訂閱',
       savedOn: '儲存日期',
       failed: '無法載入已儲存的商戶。',
       failedMore: '無法載入更多已儲存的商戶。',
-      empty: '尚未儲存任何商戶。請先執行搜尋。',
+      empty: '尚未儲存任何商戶。請先搜尋。',
       loadMore: '載入更多',
       loadingMore: '載入中…',
+    },
+
+    subscription: {
+      heading: '訂閱',
+      notSubscribed: '未訂閱',
+      expires: '到期日',
+      subscribe: (days: number) => `訂閱 ${days} 天`,
+      renew: (days: number) => `續訂 ${days} 天`,
+      suspend: '暫停',
+      resume: '恢復',
+      failed: '無法更新訂閱。',
+      renewNote: '續訂會在剩餘天數上累加，不會取代原有天數。',
+      suspendedNote: '已暫停。訂閱期仍在計算，只有「恢復」才會重新開啟網址。',
     },
 
     copy: {

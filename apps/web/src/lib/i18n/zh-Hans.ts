@@ -177,19 +177,32 @@ export const zhHans: Messages = {
       save: '保存',
       saving: '保存中…',
       alreadySaved: (name: string) => `${name} 此前已保存，现有记录未更改。`,
-      willNotOpen: (name: string, status: string) =>
-        `${name}：状态为 ${status}，此网址无法打开`,
+      notSubscribed: (name: string) =>
+        `${name}：尚未订阅，订阅后此网址才能打开`,
     },
 
     saved: {
       merchant: '商户',
-      status: '状态',
+      subscription: '订阅',
       savedOn: '保存日期',
       failed: '无法加载已保存的商户。',
       failedMore: '无法加载更多已保存的商户。',
-      empty: '尚未保存任何商户。请先执行搜索。',
+      empty: '尚未保存任何商户。请先搜索。',
       loadMore: '加载更多',
       loadingMore: '加载中…',
+    },
+
+    subscription: {
+      heading: '订阅',
+      notSubscribed: '未订阅',
+      expires: '到期日',
+      subscribe: (days: number) => `订阅 ${days} 天`,
+      renew: (days: number) => `续订 ${days} 天`,
+      suspend: '暂停',
+      resume: '恢复',
+      failed: '无法更新订阅。',
+      renewNote: '续订会在剩余天数上累加，不会取代原有天数。',
+      suspendedNote: '已暂停。订阅期仍在计算，只有"恢复"才会重新开启网址。',
     },
 
     copy: {

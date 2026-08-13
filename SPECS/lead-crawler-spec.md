@@ -370,11 +370,12 @@ whether that URL opens — carrying the current state and up to two buttons:
 Subscription
 ACTIVE · Expires 11 Sep 2026
 
-[ Renew 21 days ] [ Suspend ]
+[ Renew 7 days ] [ Suspend ]
 Renewing adds to the days remaining — it never replaces them.
 ```
 
-**One term length, 21 days, named on the button.** Only `day` is implemented
+**One term length, named on the button** — currently 7 days, in
+`DEFAULT_TERM_DAYS`. Only `day` is implemented
 (R18), and a duration picker is UI for a decision nobody has asked to make; the
 endpoint itself takes any positive day count, so a different term is an API call
 rather than a redesign. The count is interpolated into the label so the button
@@ -802,8 +803,9 @@ The MVP is complete when each of these can be demonstrated:
     subscription expires mid-session.
 27. The saved list shows a subscription's status and last valid day but offers
     no control that changes either; the editor page offers both.
-28. The editor's Subscribe/Renew button names its term — "Renew 21 days" — and
-    sends that many days.
+28. The editor's Subscribe/Renew button names its term — "Renew 7 days" — and
+    sends that many days. The number comes from `DEFAULT_TERM_DAYS`; nothing
+    restates it.
 23. `durationUnit: "month"` returns `400 unsupported_duration_unit`;
     `duration: 0` returns `400 invalid_request`.
 24. `POST` returns `201` on the first subscription and `200` on a renewal.
