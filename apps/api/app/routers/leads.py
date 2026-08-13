@@ -35,11 +35,15 @@ from app.schemas import (
     SavedMerchantsResponse,
     SaveMerchantRequest,
     SaveMerchantResponse,
+    SubscribeRequest,
+    SubscriptionResponse,
+    SubscriptionStatusRequest,
 )
 from app.services import leads as lead_service
+from app.services import subscriptions as subscription_service
 
-# The same pattern seed.py refuses custom_instructions on, and the same one the
-# generator validates output against. Three copies of this rule would drift.
+# The same pattern the generator validates its own output against. A second
+# copy of this rule would drift from the first.
 from app.services.suggestions import _URL
 
 log = logging.getLogger(__name__)
@@ -80,9 +84,10 @@ def merchant_url(merchant_id) -> str:
 
 def _as_saved(merchant: Merchant) -> SavedMerchant:
     payload = SavedMerchant.model_validate(merchant)
-    # Only an ACTIVE merchant has a URL worth copying; every other status
-    # redirects to /unavailable.
-    payload.url = merchant_url(merchant.id) if merchant.status == "ACTIVE" else None
+    # Always present. The URL is derived from the merchant id and exists
+    # whether or not it currently opens — whether it does is the subscription's
+    # answer, and the operator reads that from the subscription itself.
+    payload.url = merchant_url(merchant.id)
     return payload
 
 
@@ -120,15 +125,7 @@ def save_merchant(
     # holds should be able to tell the difference without comparing payloads.
     response.status_code = 201 if created else 200
 
-    return SaveMerchantResponse(
-        created=created,
-        merchant=_as_saved(merchant),
-        note=(
-            None
-            if merchant.status == "ACTIVE"
-            else f"{merchant.status.lower()} — this URL will not open"
-        ),
-    )
+    return SaveMerchantResponse(created=created, merchant=_as_saved(merchant))
 
 
 @router.get("/merchants", response_model=SavedMerchantsResponse)
@@ -145,6 +142,57 @@ def list_merchants(
             for merchant in lead_service.saved_merchants(db, limit, offset)
         ]
     )
+
+
+def _as_subscription(subscription) -> SubscriptionResponse:
+    return SubscriptionResponse(
+        status=subscription.status,
+        expires_at=subscription.expires_at,
+        last_valid_day=subscription_service.last_valid_day_of(subscription),
+        duration=subscription.duration,
+        duration_unit=subscription.duration_unit,
+    )
+
+
+@router.post(
+    "/merchants/{merchant_id}/subscription", response_model=SubscriptionResponse
+)
+def subscribe(
+    merchant_id: UUID,
+    payload: SubscribeRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> SubscriptionResponse:
+    """Create or renew a term. This is what makes /m/:merchantId open.
+
+    201 when the row was created, 200 when it was renewed — the same
+    create-or-read distinction save already draws, and the caller does not have
+    to compare payloads to tell which happened.
+    """
+    subscription, created = subscription_service.subscribe(
+        db, merchant_id, payload.duration, payload.duration_unit
+    )
+    db.commit()
+
+    response.status_code = 201 if created else 200
+    return _as_subscription(subscription)
+
+
+@router.patch(
+    "/merchants/{merchant_id}/subscription", response_model=SubscriptionResponse
+)
+def set_subscription_status(
+    merchant_id: UUID,
+    payload: SubscriptionStatusRequest,
+    db: Session = Depends(get_db),
+) -> SubscriptionResponse:
+    """Suspend or resume. Separate from the verb above because a term change
+    and a state change are different decisions with different consequences;
+    one body for both invites a suspend that silently re-dates the term."""
+    subscription = subscription_service.set_status(db, merchant_id, payload.status)
+    db.commit()
+
+    return _as_subscription(subscription)
 
 
 @router.get("/merchants/{merchant_id}/context", response_model=MerchantContextResponse)
@@ -257,12 +305,10 @@ def search(
                 website=hit.place.website,
                 saved=hit.saved,
                 merchant_id=hit.merchant_id,
-                status=hit.status,
-                # An archived merchant's URL redirects to /unavailable, so
-                # offering it to copy would hand over a link that does not work.
+                subscription=hit.subscription,
                 url=(
                     merchant_url(hit.merchant_id)
-                    if hit.merchant_id is not None and hit.status == "ACTIVE"
+                    if hit.merchant_id is not None
                     else None
                 ),
             )

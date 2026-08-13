@@ -17,6 +17,7 @@ Regenerate with:
 import sys
 import textwrap
 from functools import lru_cache
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -140,6 +141,19 @@ class Settings(BaseSettings):
             "forgiven."
         ),
     )
+    operator_timezone: str = Field(
+        "America/Vancouver",
+        description=(
+            "The calendar subscriptions expire on. A merchant's term runs to "
+            "midnight at the end of a day, and which instant that is depends on "
+            "a timezone — in UTC a Richmond merchant would go dark at 5pm on "
+            "their last day. One configured zone rather than a column per "
+            "merchant: every merchant is in one metro area, and a per-merchant "
+            "field is another thing the crawler must populate correctly and "
+            "silently shifts expiry when it does not. Add the column when a "
+            "merchant is signed in another zone; this stays its default."
+        ),
+    )
     create_rate_limit_per_hour: int = Field(
         60,
         description=(
@@ -259,6 +273,18 @@ class Settings(BaseSettings):
             "single trickled response still outlives any of them."
         ),
     )
+
+    @field_validator("operator_timezone")
+    @classmethod
+    def _known_timezone(cls, value: str) -> str:
+        # At startup, not at the first renewal. A typo here does not surface
+        # until somebody subscribes a merchant, and by then the failure looks
+        # like a broken endpoint rather than a broken setting.
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown IANA timezone: {value!r}") from exc
+        return value
 
     @field_validator("lead_provider")
     @classmethod

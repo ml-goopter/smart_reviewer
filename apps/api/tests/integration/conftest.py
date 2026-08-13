@@ -63,14 +63,18 @@ def client(db):
 
 @pytest.fixture
 def merchant(db):
-    from app.models import Merchant, MerchantReviewContext
+    """A merchant that can actually be reviewed — which now includes being
+    subscribed. A merchant without a subscription is unavailable, so leaving it
+    out here would turn every session test into a 409."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.models import Merchant, MerchantReviewContext, Subscription
 
     record = Merchant(
         slug="pho37-test",
         name="Pho 37",
         category="Vietnamese Restaurant",
         google_review_url="https://example.test/writereview",
-        status="ACTIVE",
     )
     db.add(record)
     db.flush()
@@ -82,6 +86,14 @@ def merchant(db):
             selling_points=["large portions", "fast service"],
             experience_topics=["food", "service", "atmosphere", "value"],
             is_approved=True,
+        )
+    )
+    db.add(
+        Subscription(
+            merchant_id=record.id,
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            duration=30,
+            duration_unit="day",
         )
     )
     db.flush()

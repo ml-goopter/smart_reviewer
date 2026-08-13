@@ -22,7 +22,13 @@ const MERCHANT = {
   id: '9f1d2c34-5678-4abc-9def-000000000001',
   name: 'Pho 37',
   slug: 'pho-37-burnaby',
-  status: 'ACTIVE',
+  subscription: {
+    status: 'ACTIVE' as const,
+    expiresAt: '2026-09-12T07:00:00Z',
+    lastValidDay: '2026-09-11',
+    duration: 30,
+    durationUnit: 'day',
+  },
   url: 'https://reviews.example.test/m/1',
   googleRating: 4.4,
   googleReviewCount: 128,
@@ -90,11 +96,10 @@ function route(path: string, method?: string) {
   }
   if (path.includes('/search')) return reply(SEARCH)
   if (path.includes('/merchants') && method === 'POST') {
-    // An archived row: saved before, and its URL will not open.
+    // A saved row that nobody has subscribed: its URL will not open yet.
     return reply({
       created: false,
-      merchant: { ...MERCHANT, status: 'ARCHIVED' },
-      note: 'archived — this URL will not open',
+      merchant: { ...MERCHANT, subscription: null },
     })
   }
   return reply({ merchants: [MERCHANT] })
@@ -296,14 +301,19 @@ describe.each(CHINESE)('%s', (locale) => {
     const { saved } = leads
     await waitFor(() => expect(screen.getByText(saved.merchant)).toBeTruthy())
 
-    expect(screen.getByText(saved.status)).toBeTruthy()
+    expect(screen.getByText(saved.subscription)).toBeTruthy()
     expect(screen.getByText(saved.savedOn)).toBeTruthy()
     expect(screen.getByRole('button', { name: leads.edit })).toBeTruthy()
     expect(screen.getByRole('button', { name: leads.copyUrl })).toBeTruthy()
 
     // A status is data. Translating it would make the screen disagree with the
     // database, and it is what the operator quotes when reporting a row.
-    expect(screen.getByText(MERCHANT.status)).toBeTruthy()
+    expect(screen.getByText(MERCHANT.subscription.status)).toBeTruthy()
+
+    // The label beside it *is* prose, so it follows the language on screen —
+    // and the date it labels is the last valid day, not the stored expiresAt,
+    // which is the midnight starting the day after.
+    expect(screen.getByText(new RegExp(leads.subscription.expires))).toBeTruthy()
 
     // The date beside it follows the language on screen, not the machine's.
     const day = new Date(MERCHANT.createdAt).toLocaleDateString(locale, {
@@ -327,11 +337,11 @@ describe.each(CHINESE)('%s', (locale) => {
 
     fireEvent.click(screen.getByRole('button', { name: leads.search.save }))
 
-    // The server sends English prose for this. What is shown is built here,
-    // from the status it sent alongside.
+    // The server sends no prose for this; the sentence is built here, so it
+    // follows the language on screen.
     await waitFor(() =>
       expect(
-        screen.getByText(leads.search.willNotOpen(MERCHANT.name, 'ARCHIVED')),
+        screen.getByText(leads.search.notSubscribed(MERCHANT.name)),
       ).toBeTruthy(),
     )
   })

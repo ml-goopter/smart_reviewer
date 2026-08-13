@@ -6,7 +6,7 @@ excluding the ones that may not. A field added to a database model therefore
 cannot leak by default.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -148,8 +148,10 @@ class LeadSearchResult(BaseModel):
     website: str | None = None
     saved: bool = False
     merchant_id: UUID | None = Field(default=None, serialization_alias="merchantId")
-    status: str | None = None
     url: str | None = None
+    # Null for an unsaved listing and for a saved-but-unsubscribed one alike;
+    # `saved` is what tells those apart.
+    subscription: "SubscriptionResponse | None" = None
 
 
 class LeadSearchResponse(BaseModel):
@@ -188,7 +190,6 @@ class SavedMerchant(BaseModel):
     category: str | None = None
     address: str | None = None
     city: str | None = None
-    status: str
     website: str | None = None
     google_place_id: str | None = Field(default=None, serialization_alias="googlePlaceId")
     google_rating: float | None = Field(default=None, serialization_alias="googleRating")
@@ -198,6 +199,10 @@ class SavedMerchant(BaseModel):
     google_synced_at: datetime | None = Field(
         default=None, serialization_alias="googleSyncedAt"
     )
+    # The object or null, never an object of nulls: a merchant that has never
+    # been subscribed has no term to describe, and `{status: null}` would be a
+    # second way to say the same thing.
+    subscription: "SubscriptionResponse | None" = None
     created_at: datetime = Field(serialization_alias="createdAt")
     # Composed per response from PUBLIC_BASE_URL, never stored — a domain
     # change must not be a data migration. Null for anything not ACTIVE, whose
@@ -210,7 +215,41 @@ class SaveMerchantResponse(BaseModel):
 
     created: bool
     merchant: SavedMerchant
-    note: str | None = None
+
+
+class SubscribeRequest(BaseModel):
+    """A term. Create and renew take the same body — see services.subscriptions."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    duration: int = Field(ge=1)
+    # Validated here only as a string; which units are actually implemented is
+    # the service's call, so the answer is one error code rather than a 422
+    # from Pydantic and a 400 from the service for the same mistake.
+    duration_unit: str = Field(alias="durationUnit", min_length=1, max_length=10)
+
+
+class SubscriptionStatusRequest(BaseModel):
+    """Suspend or resume. Deliberately cannot carry a term: a status change
+    must not be able to re-date a subscription as a side effect."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    status: str = Field(min_length=1, max_length=20)
+
+
+class SubscriptionResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+    status: str
+    expires_at: datetime = Field(serialization_alias="expiresAt")
+    # The last day the link works: `expires_at` names the first dead midnight,
+    # so showing it raw credits the merchant a day they do not have. Derived
+    # here because it is `expires_at` minus one day *in OPERATOR_TIMEZONE*, and
+    # the browser does not know that zone.
+    last_valid_day: date = Field(serialization_alias="lastValidDay")
+    duration: int
+    duration_unit: str = Field(serialization_alias="durationUnit")
 
 
 class SavedMerchantsResponse(BaseModel):

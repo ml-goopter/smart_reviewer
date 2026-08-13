@@ -17,13 +17,14 @@ Assumptions:
 
 ## Model Overview
 
-The MVP uses five core models:
+The MVP uses six core models:
 
 1. `merchants`
 2. `merchant_review_context`
 3. `smart_review_sessions`
 4. `smart_review_suggestions`
 5. `smart_review_events`
+6. `subscriptions`
 
 ## Relationship Overview
 
@@ -31,6 +32,8 @@ The MVP uses five core models:
 merchants
   │
   ├── merchant_review_context
+  │
+  ├── subscriptions            (0..1 — the availability gate, DECISIONS.md R17)
   │
   └── smart_review_sessions
            │
@@ -43,6 +46,7 @@ merchants
 ```mermaid
 erDiagram
     MERCHANTS ||--o| MERCHANT_REVIEW_CONTEXT : has
+    MERCHANTS ||--o| SUBSCRIPTIONS : has
     MERCHANTS ||--o{ SMART_REVIEW_SESSIONS : has
     SMART_REVIEW_SESSIONS ||--o{ SMART_REVIEW_SUGGESTIONS : generates
     SMART_REVIEW_SESSIONS ||--o{ SMART_REVIEW_EVENTS : records
@@ -62,11 +66,21 @@ erDiagram
         varchar google_place_id
         text google_profile_url
         text google_review_url
-        varchar status
         varchar slug
         timestamptz created_at
         timestamptz updated_at
         timestamptz archived_at
+    }
+
+    SUBSCRIPTIONS {
+        uuid id PK
+        uuid merchant_id FK
+        varchar status
+        timestamptz expires_at
+        integer duration
+        varchar duration_unit
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     MERCHANT_REVIEW_CONTEXT {
@@ -93,7 +107,6 @@ erDiagram
         varchar status
         timestamptz created_at
         timestamptz expires_at
-        timestamptz disabled_at
         timestamptz completed_at
         timestamptz first_opened_at
         timestamptz last_opened_at
@@ -159,11 +172,10 @@ The merchant is the central business entity for the Reviewer MVP.
 | `google_place_id` | `varchar` | No | Google Maps Place ID |
 | `google_profile_url` | `text` | No | Google Maps / Business Profile URL |
 | `google_review_url` | `text` | Yes for active reviewer | Official Google review destination |
-| `status` | `varchar` | Yes | Merchant status |
-| `slug` | `varchar` | Yes | Stable upsert key for the seed script. Not public — the QR carries the uuid |
+| `slug` | `varchar` | Yes | Human-readable identifier, unique. Not public — the QR carries the uuid |
 | `created_at` | `timestamptz` | Yes | Creation timestamp |
 | `updated_at` | `timestamptz` | Yes | Last update timestamp |
-| `archived_at` | `timestamptz` | No | Soft-delete/archive timestamp |
+| `archived_at` | `timestamptz` | No | Soft-delete/archive timestamp. Nothing reads it (DECISIONS.md R17) |
 
 ### Constraints
 
@@ -174,17 +186,17 @@ UNIQUE (google_place_id)
 
 `google_place_id` can remain nullable until a Google business has been linked.
 
-### Suggested Status Values
+### No `status` column
 
-```text
-ACTIVE
-INACTIVE
-ARCHIVED
-```
+Dropped by DECISIONS.md R17. Whether a merchant can be reviewed is answered by
+`subscriptions` (§6) and nothing else — two independent notions of "switched
+off" is one too many, and the suspension states (`CANCELLED`, `PAUSED`) belong
+on the subscription that they suspend.
 
 ### Business Rule
 
-A merchant should not be able to create an active Smart Reviewer session unless a valid `google_review_url` exists.
+A merchant can create a Smart Reviewer session only when it has a valid
+`google_review_url` **and** an active subscription (§6).
 
 ---
 
@@ -215,7 +227,7 @@ This is intentionally separate from `merchants` so AI prompt/context data can ev
 
 ```sql
 PRIMARY KEY (id)
-FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE
 UNIQUE (merchant_id)
 ```
 
@@ -265,7 +277,6 @@ This is the main security boundary for the public-facing Smart Reviewer Web App.
 | `status` | `varchar` | Yes | Current session status |
 | `created_at` | `timestamptz` | Yes | Creation timestamp |
 | `expires_at` | `timestamptz` | Yes | Expiration timestamp |
-| `disabled_at` | `timestamptz` | No | Manual disable timestamp |
 | `completed_at` | `timestamptz` | No | Completion timestamp |
 | `first_opened_at` | `timestamptz` | No | First successful open |
 | `last_opened_at` | `timestamptz` | No | Latest successful open |
@@ -283,9 +294,9 @@ This is the main security boundary for the public-facing Smart Reviewer Web App.
 ```text
 ACTIVE
 COMPLETED
-DISABLED
 
-(EXPIRED removed: expires_at is authoritative — DECISIONS.md R7)
+(EXPIRED removed: expires_at is authoritative — DECISIONS.md R7.
+ DISABLED removed with disabled_at — R7b.)
 ```
 
 ### Defaults
@@ -318,11 +329,9 @@ incoming secure token
     ↓
 lookup token
     ↓
-validate disabled_at IS NULL
-    ↓
 validate expires_at > now()
     ↓
-load merchant
+load merchant, validate google_review_url present
 ```
 
 `status` is deliberately **not** checked: completion is a milestone, not a gate,
@@ -462,6 +471,83 @@ FOREIGN KEY (suggestion_id) REFERENCES smart_review_suggestions(id)
 
 ---
 
+# 6. `subscriptions`
+
+Determines how long a merchant's review link stays usable. This is the only
+**availability** gate (DECISIONS.md R17) — there is no merchant status column.
+`google_review_url` is checked separately and for a different reason: absent, a
+merchant is misconfigured rather than switched off.
+
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `id` | `uuid` | Yes | Primary key |
+| `merchant_id` | `uuid` | Yes | FK to `merchants.id`, **unique** |
+| `status` | `varchar` | Yes | `ACTIVE` \| `CANCELLED` \| `PAUSED`. Default `ACTIVE` |
+| `expires_at` | `timestamptz` | Yes | Persisted, never recalculated on read |
+| `duration` | `integer` | Yes | Positive. The most recent term, not the total |
+| `duration_unit` | `varchar` | Yes | `day` \| `month` \| `year`. Only `day` is implemented |
+| `created_at` | `timestamptz` | Yes | First ever subscribed |
+| `updated_at` | `timestamptz` | Yes | Last time the row moved — renewal or a status change |
+
+### Constraints
+
+```sql
+PRIMARY KEY (id)
+FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE
+UNIQUE (merchant_id)
+
+CHECK (status IN ('ACTIVE', 'CANCELLED', 'PAUSED'))
+CHECK (duration_unit IN ('day', 'month', 'year'))
+CHECK (duration > 0)
+```
+
+`varchar` + `CHECK` rather than a Postgres enum, matching `source` and the
+session statuses. `ON DELETE CASCADE` matches `merchant_review_context` as the
+code declares it: a subscription has no meaning without its merchant.
+
+`UNIQUE (merchant_id)` is the whole index story — Postgres backs the constraint
+with an index, and that index also serves the lookup on the session-creation
+path. Do not add a second one.
+
+### Business Rule
+
+A merchant is **ACTIVE** when:
+
+```text
+a subscriptions row exists
+AND status = 'ACTIVE'
+AND now < expires_at
+```
+
+A merchant is **INACTIVE** when any of those fails — including having no
+subscription row at all. Session creation is rejected with the existing
+`409 merchant_unavailable`; the customer is never told which reason applied.
+
+### Term arithmetic
+
+```text
+create   expires_at = local_midnight(tomorrow) + duration
+renew    expires_at = max(expires_at, local_midnight(tomorrow)) + duration
+```
+
+Midnight is **exclusive** and resolved in `OPERATOR_TIMEZONE`, then stored as
+UTC. A 30-day term created 12 Aug stores `12 Sep 00:00` local — the merchant's
+last valid day is **11 Sep**. Any UI showing an expiry date must render the last
+valid day, not this column.
+
+Renewal extends from the later of the current expiry and today, so renewing
+early never burns paid days and a lapsed subscription is never credited dead
+time. Full rationale, including the DST rule for adding the term, is in
+DECISIONS.md R18.
+
+### Suspension
+
+`CANCELLED` and `PAUSED` close the gate. Neither moves `expires_at` and neither
+credits the suspended time back — resuming is `status = 'ACTIVE'` and nothing
+else (R19).
+
+---
+
 # Recommended Indexes
 
 ## Merchants
@@ -471,6 +557,12 @@ CREATE UNIQUE INDEX merchants_google_place_id_idx
 ON merchants (google_place_id)
 WHERE google_place_id IS NOT NULL;
 ```
+
+## Subscriptions
+
+None beyond the index Postgres creates for `UNIQUE (merchant_id)`, which is also
+the session-creation lookup. No index on `expires_at`: nothing scans for
+expiring subscriptions, because nothing warns before expiry (DECISIONS.md S1).
 
 ## Smart Review Sessions
 
@@ -515,26 +607,29 @@ ON smart_review_events (event_type, created_at);
 
 # MVP Data Flow
 
-## 1. Merchant Setup (Via a setup script that write data to db)
+## 1. Merchant Setup (Via the lead crawler — DECISIONS.md R20)
 
 ```text
-Admin searches/selects Google business
+Operator searches Google Places in /leads
         ↓
-Create merchants record
+Save → create merchants record (Place ID, review URL, snapshot)
         ↓
-Store Google Place ID
+Auto-fill merchant_review_context from Place Details
         ↓
-Store Google review URL
+Subscribe the merchant → create subscriptions row
         ↓
-Configure merchant_review_context
+The /m/{merchantId} URL now works
 ```
+
+There is no seed script and no YAML. Until the subscription exists the merchant
+is INACTIVE and its URL redirects to `/unavailable`.
 
 ## 2. Create Review Session
 
 ```text
 Customer scans QR → GET /m/{merchantId}
         ↓
-Backend validates merchant, creates smart_review_sessions row
+Backend validates merchant + subscription, creates smart_review_sessions row
         ↓
 302 → /r/{token}          Cache-Control: no-store
 ```
@@ -557,11 +652,9 @@ Backend hashes supplied token
 Find smart_review_sessions
         ↓
 Check:
-  status = ACTIVE
   expires_at > NOW()
-  disabled_at IS NULL
         ↓
-Load merchant
+Load merchant (must still have google_review_url)
         ↓
 Load merchant_review_context
         ↓
@@ -616,6 +709,9 @@ merchants
 
 merchant_review_context
     Merchant-approved information supplied to AI
+
+subscriptions
+    How long a merchant's review link stays usable — the availability gate
 
 smart_review_sessions
     Secure, expiring public Reviewer sessions

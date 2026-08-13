@@ -51,7 +51,7 @@ POST /api/review/sessions
 | Request body | `{ "merchantId": "uuid" }` |
 | Success status | `201 Created` |
 | Success response | `{ "token": "secure-session-token" }` |
-| Backend validates | Merchant exists, is active, and has a Google review URL |
+| Backend validates | Merchant exists, has an **active subscription**, and has a Google review URL. See DECISIONS.md R17 |
 | Backend creates | `smart_review_sessions` record |
 | Backend generates | Cryptographically secure session token |
 | Backend stores | The token directly (plaintext). See DECISIONS.md R2 |
@@ -85,7 +85,11 @@ POST /api/review/sessions
 | `429` | Rate limited | Show retryable error |
 | `500` | Unexpected backend failure | Show generic error |
 
-The public UI should not reveal whether the merchant is inactive, archived, missing a Google URL, or otherwise unavailable.
+`409` carries the stable code `merchant_unavailable` for every cause: no
+subscription, an expired one, a cancelled or paused one, or a missing Google
+review URL. The public UI must not reveal which applies — whether a business is
+behind on payment is that business's private information, and the customer can
+act on none of it. There is deliberately no `merchant_subscription_expired`.
 
 ---
 
@@ -103,7 +107,7 @@ GET /api/review/sessions/:token
 | Authentication | Session token |
 | Request body | None |
 | Success status | `200 OK` |
-| Backend validates | Token, session status, expiration, disabled state, merchant availability |
+| Backend validates | Token, expiration, disabled state, and that the merchant still has a Google review URL. **Not** the subscription — that is checked once, at session creation (DECISIONS.md R17) |
 | Merchant resolution | From `smart_review_sessions.merchant_id` |
 | Backend may record | `SESSION_OPENED` |
 | Response contains | Public merchant data, expiry, suggestions, Google review URL |
@@ -170,7 +174,7 @@ internal error details
 | Status | Meaning | Frontend Behavior |
 |---|---|---|
 | `404` | Invalid or unknown session | Show invalid-session state |
-| `410` | Expired or disabled session | Show invalid-session state |
+| `410` | Expired or disabled session, or the merchant lost its Google review URL | Show invalid-session state |
 | `429` | Rate limited | Show retryable error |
 | `500` | Backend failure | Show generic error |
 

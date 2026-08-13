@@ -69,7 +69,6 @@ def merchant():
         id=UUID(MERCHANT_ID),
         name="Pho 37",
         slug="pho-37-richmond",
-        status="ACTIVE",
         created_at=datetime.now(UTC),
     )
 
@@ -265,11 +264,14 @@ def test_every_shape_of_link_is_caught(client, instruction):
     assert response.status_code == 400
 
 
-def test_the_url_rule_is_the_same_object_the_seed_uses():
+def test_the_url_rule_is_the_one_the_generator_validates_against():
+    """The guard exists to stop an instruction that would make every generated
+    suggestion fail validation. It has to be the same pattern doing both jobs,
+    or the editor accepts text the generator will reject forever."""
     from app.routers import leads as leads_router
-    from app import seed
+    from app.services import suggestions
 
-    assert leads_router._URL is seed._URL
+    assert leads_router._URL is suggestions._URL
 
 
 def test_an_unknown_merchant_is_404(client):
@@ -286,7 +288,7 @@ def test_merchant_fields_cannot_be_edited_through_this_endpoint(client):
 
     response = api(db).put(
         f"/api/leads/merchants/{MERCHANT_ID}/context",
-        json={**FULL, "name": "Renamed", "status": "ARCHIVED"},
+        json={**FULL, "name": "Renamed", "slug": "renamed"},
     )
 
     assert response.status_code == 400

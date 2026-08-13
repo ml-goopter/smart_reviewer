@@ -6,7 +6,7 @@ system, and hand back the URL that already powers Smart Reviewer.
 This is **not a standalone product**. A saved lead is a row in the existing
 `merchants` table, and the URL the tool produces is the existing QR entry route
 `/m/:merchantId`. Read `DECISIONS.md` first; the decisions below extend it and
-are numbered `L1`–`L19` so the two lists never collide.
+are numbered `L1`–`L22` so the two lists never collide.
 
 ---
 
@@ -14,7 +14,7 @@ are numbered `L1`–`L19` so the two lists never collide.
 
 | # | Decision |
 |---|---|
-| L1 | The crawler writes an **ACTIVE row in the existing `merchants` table**. The deliverable URL is the existing `/m/:merchantId` |
+| L1 | The crawler writes a row in the existing `merchants` table. The deliverable URL is the existing `/m/:merchantId`. ~~ACTIVE~~ → **the row is inert until it is subscribed** (L20) |
 | L2 | `slug` is slugified `name`+`city`, suffixed on collision, and **returned in the save response** |
 | L3 | **Places API (New) `searchText`**, behind a provider adapter with a fixture-backed fake |
 | L4 | Rating ceiling and review count are filtered **in our code**; pagination runs to Google's ceiling and the response **reports the funnel** |
@@ -32,7 +32,10 @@ are numbered `L1`–`L19` so the two lists never collide.
 | L16 | `merchant_review_context` is **auto-filled from Places** on save and marked approved |
 | L17 | **`GET /api/leads/merchants`** lists saved merchants, newest first |
 | L18 | An **admin editor at `/leads/:merchantId`** covers the eight `review_context` fields |
-| L19 | **No machine-vs-human provenance is tracked.** YAML seeding is demo-only; the editor is the real path |
+| L19 | **No machine-vs-human provenance is tracked.** ~~YAML seeding is demo-only~~ → **seeding is deleted** (R20); the crawler and editor are the only paths |
+| L20 | The crawler **owns subscriptions**: `POST /api/leads/merchants/{id}/subscription` creates, renews and suspends. A saved merchant without one is INACTIVE and its URL does not open |
+| L21 | Saved rows carry a **`subscription` object — `{status, expiresAt, lastValidDay}` — or `null`**. No derived "active" flag; the UI decides what the values mean |
+| L22 | The saved list **shows** a subscription; only the **merchant's own editor page changes one**. A term is money, not a row action |
 
 ---
 
@@ -41,10 +44,11 @@ are numbered `L1`–`L19` so the two lists never collide.
 1. Search for merchants using Google Places data.
 2. View matching merchants.
 3. Save a merchant into the system.
-4. Copy its Smart Reviewer URL.
-5. Fill in what Google cannot supply, so the URL demos well.
+4. Subscribe it, so its URL opens.
+5. Copy its Smart Reviewer URL.
+6. Fill in what Google cannot supply, so the URL demos well.
 
-Step 5 is not decoration. Suggestion quality is bounded entirely by
+Step 6 is not decoration. Suggestion quality is bounded entirely by
 `merchant_review_context`, and Places supplies two of its eight fields.
 
 ---
@@ -170,9 +174,10 @@ as a broken search rather than a narrow filter.
 
 Every returned Place ID is checked against `merchants` in a single
 `WHERE google_place_id = ANY(:ids)` — served by the existing partial unique
-index `merchants_google_place_id_idx`. Saved rows carry their merchant id, URL
-and status, so the row's action is **Copy URL** rather than Save, with no
-round trip to discover it.
+index `merchants_google_place_id_idx`. Saved rows carry their merchant id, URL,
+subscription status and expiry, so the row's action is **Copy URL** rather than
+Save, with no round trip to discover it — and the operator can see at a glance
+whether that URL currently opens.
 
 ### Partial failures
 
@@ -209,20 +214,34 @@ stale browser tab from recording last week's rating as today's fact.
 `google_place_id` is the key, and it is always present — `searchText` always
 returns one.
 
-**Save never mutates an existing row.** A merchant seeded with curated context,
-or deliberately set to `ARCHIVED`, is returned exactly as it stands:
+**Save never mutates an existing row**, and it never touches the subscription.
+A merchant with curated context, or one deliberately cancelled, is returned
+exactly as it stands:
 
 ```
-201  {created: true,  status: "ACTIVE",   url: "https://…/m/8f3c…"}
-200  {created: false, status: "ACTIVE",   url: "https://…/m/8f3c…"}
-200  {created: false, status: "ARCHIVED", url: null,
-      note: "archived — this URL will not open"}
+201  {created: true,  url: "https://…/m/8f3c…",
+      subscription: null}
+200  {created: false, url: "https://…/m/8f3c…",
+      subscription: {status: "ACTIVE",    expiresAt: "2026-09-12T07:00:00Z",
+                     lastValidDay: "2026-09-11"}}
+200  {created: false, url: "https://…/m/8f3c…",
+      subscription: {status: "CANCELLED", expiresAt: "2027-03-01T07:00:00Z",
+                     lastValidDay: "2027-02-28"}}
 ```
+
+`url` is always present — it is derived from the merchant id and exists whether
+or not it currently opens.
+
+**`subscription` is the object or `null`, never an object of nulls.** A merchant
+that has never been subscribed carries `subscription: null`, which is the state
+every newly saved merchant is in: **the URL does not open until the merchant is
+subscribed** (§2.1.4a). In a search result an unsaved listing also carries
+`null`; `saved` distinguishes the two.
 
 Refreshing the Google snapshot on re-save would be the merchant-data refresh
 that §2.1.15 defers, arriving through a side door and only for whichever rows
-someone happened to re-search. Reactivating an archived row would overrule
-whoever archived it.
+someone happened to re-search. Silently renewing on re-save would be worse: it
+would turn re-searching a listing into a free extension.
 
 ### What is written
 
@@ -241,12 +260,12 @@ whoever archived it.
 | `google_review_count` | `userRatingCount` |
 | `google_synced_at` | now |
 | `source` | `'GOOGLE_PLACES'` |
-| `status` | `'ACTIVE'` |
 | `slug` | L2 |
 
-`status = ACTIVE` is what makes the copied URL work immediately:
-`google_review_url` derives from the Place ID, and session creation requires
-only an ACTIVE merchant with that URL present.
+No `status` — the column is gone (R17). Save writes the merchant and its
+context and stops there; a lead the operator crawled but never signed is not a
+customer, and granting it a working URL automatically would make the
+subscription gate decorative.
 
 ### Slug
 
@@ -276,6 +295,118 @@ fetching it.
 
 ---
 
+## 2.1.4a Subscribing a merchant
+
+A saved merchant is inert. Subscribing it is what makes `/m/:merchantId` open,
+and it is a separate, deliberate act — see DECISIONS.md R17–R20 for the model.
+
+### Create or renew
+
+```json
+POST /api/leads/merchants/{merchantId}/subscription
+{ "duration": 30, "durationUnit": "day" }
+```
+
+```json
+201  { "status": "ACTIVE", "expiresAt": "2026-09-12T07:00:00Z",
+       "lastValidDay": "2026-09-11", "duration": 30, "durationUnit": "day" }
+```
+
+One endpoint for both: `merchant_id` is unique, so there is exactly one row to
+create or update and the caller has no reason to know which it did. `201` when
+the row was created, `200` when it was renewed — the same create-or-read
+distinction §2.1.4 already draws.
+
+Renewal extends from the later of the current expiry and today (R18), so
+renewing a merchant with three weeks left adds to those weeks rather than
+discarding them. Renewing a `CANCELLED` or `PAUSED` subscription moves
+`expires_at` but does **not** reactivate it; that is `PATCH`.
+
+`durationUnit` accepts only `"day"` — see R18. `duration` must be a positive
+integer.
+
+### Suspend or resume
+
+```json
+PATCH /api/leads/merchants/{merchantId}/subscription
+{ "status": "CANCELLED" }
+```
+
+```json
+200  { "status": "CANCELLED", "expiresAt": "2027-03-01T07:00:00Z",
+       "lastValidDay": "2027-02-28", "duration": 365, "durationUnit": "day" }
+```
+
+`ACTIVE`, `CANCELLED` or `PAUSED`. `expires_at` never moves, in either
+direction — suspension closes the gate and the clock keeps running (R19).
+Separate from the create/renew verb because a term change and a state change are
+different acts with different consequences, and folding them into one body
+invites a suspend that silently re-dates the subscription.
+
+### Errors
+
+| Code | Status | Meaning |
+|---|---|---|
+| `merchant_not_found` | 404 | No such merchant |
+| `subscription_not_found` | 404 | `PATCH` on a merchant that has never been subscribed |
+| `invalid_request` | 400 | Non-positive `duration`, unknown `status`, unknown field |
+| `unsupported_duration_unit` | 400 | `month` or `year` — accepted by the schema, not implemented |
+
+`unsupported_duration_unit` is its own code rather than `invalid_request`: the
+value is valid and will one day work, and a caller that cannot tell the two
+apart will treat a temporary limitation as a bug in its own payload.
+
+### UI
+
+Both the saved-merchants row and the editor carry the subscription object, or
+`null` when there is none (L21). The list is where the operator will notice a
+dead link, since nothing warns them (S1) — but it only *shows* (L22).
+
+The **editor at `/leads/:merchantId`** is where a subscription changes. A card
+directly under the merchant's URL — because the subscription is what decides
+whether that URL opens — carrying the current state and up to two buttons:
+
+```
+Subscription
+ACTIVE · Expires 11 Sep 2026
+
+[ Renew 7 days ] [ Suspend ]
+Renewing adds to the days remaining — it never replaces them.
+```
+
+**One term length, named on the button** — currently 7 days, in
+`DEFAULT_TERM_DAYS`. Only `day` is implemented
+(R18), and a duration picker is UI for a decision nobody has asked to make; the
+endpoint itself takes any positive day count, so a different term is an API call
+rather than a redesign. The count is interpolated into the label so the button
+says what it will do.
+
+The note under the buttons is not decoration: "Renew" does not mean "21 days
+from today". It extends from the later of the current expiry and tonight, so an
+early renewal adds to days already paid for — the behaviour an operator is most
+likely to guess wrong. On a suspended merchant the note says the other
+surprising thing instead: Renew is still offered, because a term can be extended
+while suspended, but only **Resume** reopens the URL.
+
+Not part of the context form below it. That form replaces eight fields on
+submit; a subscription is not a draft to be saved, and a term granted only when
+somebody remembers to press Save is a term nobody can rely on.
+
+**Render `lastValidDay`, not `expiresAt`.** The stored timestamp is the first
+*dead* midnight — `2026-09-12T07:00:00Z` is a merchant whose last usable day is
+11 Sep. Showing the raw date credits them a day they do not have.
+
+`lastValidDay` is a plain `YYYY-MM-DD` string computed server-side, and it is
+the one thing the server derives. Not because deriving is desirable — L21 exists
+to keep the server out of the UI's judgements — but because this particular
+value cannot be computed anywhere else: it is `expiresAt` minus one day *in
+`OPERATOR_TIMEZONE`*, and the browser does not know that zone. An operator
+travelling, or on a laptop set to UTC, would otherwise render a date that is off
+by one for half the day. `status` stays raw and there is still no `active` flag;
+what counts as usable remains the UI's call.
+
+---
+
 ## 2.1.5 Merchant URL
 
 The URL is the existing entry route, built from `PUBLIC_BASE_URL`:
@@ -293,8 +424,9 @@ would produce `http://localhost:5173/m/…` when the operator is on the Vite dev
 server: a dead link that looks entirely normal once pasted into an email.
 
 The UI lets the operator **view**, **copy**, and **open** it. The URL is stable
-for the life of the merchant; regeneration and disabling are out of scope
-(§2.1.15) — the URL is the primary key, so there is no token to rotate.
+for the life of the merchant and regeneration is out of scope (§2.1.15) — the
+URL is the primary key, so there is no token to rotate. Whether it *opens* is a
+separate question, answered by the subscription (§2.1.4a).
 
 ---
 
@@ -307,8 +439,10 @@ merchant record page. It enters the existing customer flow:
 GET /m/{merchantId} → 302 /r/{token}   (Cache-Control: no-store)
 ```
 
-An unknown, inactive, or archived merchant redirects to `/unavailable`, as it
-does today. No new page is built.
+An unknown merchant, one with no subscription, or one whose subscription has
+expired or been suspended, redirects to `/unavailable`, as it does today. All
+causes share the destination — which applies is the merchant's private
+information. No new page is built.
 
 ---
 
@@ -316,15 +450,48 @@ does today. No new page is built.
 
 `GET /api/leads/merchants` — paginated, newest first, no Google calls:
 
+Today is 12 Aug 2026 in this mock:
+
 ```
 /leads  ·  Search | Saved (37)
 
- Sushi Mura      Richmond   ACTIVE   10 Aug  [Copy] [Edit]
- Pho 37          Richmond   ACTIVE   09 Aug  [Copy] [Edit]
+ MERCHANT                    SUBSCRIPTION            SAVED
+
+ Sushi Mura                  ACTIVE                  10 Aug   [Copy URL] [Edit]
+ Richmond · sushi-mura        Expires 11 Sep 2026
+
+ Pho 37                      ACTIVE                  09 Aug   [Copy URL] [Edit]
+ Richmond · pho-37            Expires 21 Aug 2026
+
+ Kam Do                      not subscribed          09 Aug   [Copy URL] [Edit]
+ Richmond · kam-do
+
+ Nine Dishes                 CANCELLED               08 Aug   [Copy URL] [Edit]
+ Vancouver · nine-dishes      Expires 28 Feb 2027
 ```
 
 Without it, a URL not pasted in the moment is recoverable only by paying Google
 to find the same listing again.
+
+The subscription column is the only place a dead link becomes visible — nothing
+warns before expiry (S1). `Pho 37` above has ten days left and says so; a row
+that has already lapsed shows a past date and reads the same way.
+
+**"Expires" labels `lastValidDay`, never the raw `expiresAt`.** The two differ
+by a day: `expiresAt` is the midnight *starting* the day after the last usable
+one, so "Expires 12 Sep" would promise a day the link does not work, while
+"Expires 11 Sep 2026" is exactly true — it works all of the 11th and dies at its
+end. **The year is always shown**, because a term routinely runs into the next
+one and "Expires 11 Sep" is ambiguous the moment it does.
+
+Day, month and year are ordered by the viewer's locale rather than by a format
+string of ours; only the presence of all three is fixed.
+
+**The list is read-only about subscriptions** (L22). Changing one is a
+deliberate act with money behind it, and offering it as a row action in a
+fifty-row table makes a mis-tap grant a term or take a live merchant down. The
+controls live on the merchant's own page, one screen further in, where the
+operator has already said which merchant they mean.
 
 ---
 
@@ -348,23 +515,24 @@ That set is exactly what Places cannot supply and exactly what the AI reads.
 Merchant fields are not editable here: they are Google's facts, and overwriting
 them silently would leave no way to tell what came from Google.
 
-**Validation is shared with `seed.py`**, not reimplemented — list fields must be
+**Validation lives here**, in the one remaining write path — list fields must be
 lists of strings, and `custom_instructions` containing a URL is rejected. That
 guard exists because an instruction like *"always mention www.example.com"*
 makes every generated suggestion fail URL validation, permanently and silently
-breaking that merchant.
+breaking that merchant. It used to be shared with `seed.py`; that module is
+deleted (R20), so this is where it now lives.
 
 Semantics: a save **replaces all eight fields** with what the form holds; a
 blank input stores `null`, not an empty list. `is_approved` stays true.
 
-No provenance is recorded (L19). YAML seeding remains what it is today — a demo
-convenience — and is not the path a real merchant's details travel.
+No provenance is recorded (L19). There is no other path a merchant's details
+can travel.
 
 ---
 
 ## 2.1.9 API
 
-All six endpoints are open (L10) and live under `/api/leads/`. Errors use the
+All eight endpoints are open (L10) and live under `/api/leads/`. Errors use the
 API's existing contract — `{"error": "<stable_code>"}` with the status — never a
 sentence, and never anything derived from Google's own message.
 
@@ -376,7 +544,9 @@ sentence, and never anything derived from Google's own message.
 | `invalid_rating_range` | 400 | Minimum rating above the maximum |
 | `invalid_request` | 400 | Criteria out of range, or an unknown field |
 | `instructions_contain_url` | 400 | `custom_instructions` holds a link |
+| `unsupported_duration_unit` | 400 | `month` or `year` — schema-valid, not implemented |
 | `merchant_not_found` | 404 | No such merchant |
+| `subscription_not_found` | 404 | `PATCH` on a merchant that has never been subscribed |
 | `provider_unavailable` | 502 | Google failed, with nothing partial to return |
 
 ### `POST /api/leads/search`
@@ -407,20 +577,32 @@ action, not a cacheable read.
       "placeId": "ChIJ…", "name": "Sushi Mura", "category": "Sushi Restaurant",
       "address": "…", "distanceMeters": 1200, "rating": 4.2,
       "reviewCount": 187, "phone": "+1…", "website": "https://…",
-      "saved": false, "merchantId": null, "url": null, "status": null
+      "saved": false, "merchantId": null, "url": null, "subscription": null
     }
   ]
 }
 ```
 
+`subscription` is `{status, expiresAt, lastValidDay}` on subscribed rows and
+`null` on everything else — unsaved listings and saved-but-never-subscribed
+merchants alike (L21). `saved` distinguishes those two.
+
 ### `POST /api/leads/merchants`
 
 Body `{placeId}`. Returns `201`/`200` per §2.1.4, with `created`, `merchantId`,
-`slug`, `status`, `url`, and the stored merchant fields.
+`slug`, `url`, `subscription`, and the stored merchant fields.
 
 ### `GET /api/leads/merchants`
 
-`?limit=&offset=`. Newest first.
+`?limit=&offset=`. Newest first. Each row carries `subscription` (L21).
+
+### `POST /api/leads/merchants/{id}/subscription`
+
+Body `{duration, durationUnit}`. Creates or renews. §2.1.4a.
+
+### `PATCH /api/leads/merchants/{id}/subscription`
+
+Body `{status}`. Suspends or resumes; never moves `expiresAt`. §2.1.4a.
 
 ### `GET /api/leads/categories`
 
@@ -443,7 +625,7 @@ second convention would be one the SPA has to learn twice.
 
 ## 2.1.10 Data Model
 
-One migration:
+The crawler's own migration:
 
 ```sql
 ALTER TABLE merchants
@@ -458,13 +640,40 @@ ALTER TABLE merchants
   CHECK (source IN ('YAML', 'GOOGLE_PLACES'));
 ```
 
-`source` defaults to `'YAML'` because seeding is the only path that exists
-today, so every existing row is correctly labelled by the default alone.
-`varchar` + `CHECK` rather than a Postgres enum, matching the reasoning already
-recorded on `MERCHANT_STATUSES`.
+`source` defaults to `'YAML'` because seeding was the only path that existed
+when this column was added; the value is now historical, marking the rows that
+predate the crawler. `varchar` + `CHECK` rather than a Postgres enum.
 
-No new tables. No new index: `merchants_google_place_id_idx` already serves
-both duplicate detection and the saved-row lookup.
+No new index: `merchants_google_place_id_idx` already serves both duplicate
+detection and the saved-row lookup.
+
+### Subscriptions migration
+
+Separate and later — schema, backfill, and the `merchants.status` drop, in that
+order (R17, R20). Table definition and constraints are in `data-models.md` §6.
+
+```sql
+CREATE TABLE subscriptions (…);          -- id, created_at, updated_at default
+                                         -- as every other table does
+
+INSERT INTO subscriptions (merchant_id, status, expires_at, duration, duration_unit)
+SELECT id, 'ACTIVE', :backfill_expires_at, 365, 'day'
+FROM merchants;
+
+ALTER TABLE merchants DROP COLUMN status;   -- takes ck_merchants_status with it
+```
+
+`:backfill_expires_at` is computed **in Python, in the migration, once**, by the
+same function the service uses — `local_midnight(tomorrow) + 365 days` in
+`OPERATOR_TIMEZONE`, as a UTC timestamp. Not in SQL: a second implementation of
+the term arithmetic is a second chance to get the timezone wrong, and it would
+be the one implementation nobody ever runs again to find out.
+
+The backfill runs **before** the drop and covers every merchant, so no live QR
+code dies at deploy. It is also the last moment the `status` values exist —
+check for non-`ACTIVE` rows first, because a merchant currently `INACTIVE` or
+`ARCHIVED` becomes reachable again the instant it is backfilled and the
+distinction is not recoverable afterwards.
 
 `google_synced_at` records the snapshot's age, so the UI can render
 "4.2 ★ · 187 reviews (as of 10 Aug 2026)" instead of implying live data — and
@@ -510,6 +719,14 @@ Consequences, accepted deliberately for a prototype:
 3. **`TRUST_PROXY_HEADERS` is true**, so a caller hitting `:8000` directly also
    chooses its own `X-Real-IP`, and therefore its own rate-limit bucket on the
    *existing* endpoints.
+4. **Anyone who reaches the host can switch a live merchant off.** `PATCH
+   …/subscription {status: "CANCELLED"}` kills a paying merchant's QR code,
+   and `POST …/subscription` grants an unlimited free term to anyone. This is
+   the first of these risks with an effect a *customer* sees: the previous three
+   corrupt internal data, this one takes a business's review link down mid-trade
+   with no alert and no audit trail (R19 keeps no history). It is the strongest
+   argument for closing §2.1.12 before the pilot has paying merchants rather
+   than after.
 
 Closing these later is a `location` block and a `127.0.0.1:` prefix, plus real
 auth on `/api/leads/*`.
@@ -529,8 +746,9 @@ secure context, so the reviewer's core mechanic fails silently.
    marked.
 4. **Select and save** — one click; the server re-fetches Place Details, writes
    the merchant and its context, and returns the URL and slug.
-5. **Copy the URL** — absolute, built from `PUBLIC_BASE_URL`.
-6. **Fill the gaps** — open the editor and add products, menu items, keywords
+5. **Subscribe** — the URL does not open until this happens.
+6. **Copy the URL** — absolute, built from `PUBLIC_BASE_URL`.
+7. **Fill the gaps** — open the editor and add products, menu items, keywords
    and selling points. Until then the merchant demos on Google's generic
    summary alone.
 
@@ -553,8 +771,9 @@ The MVP is complete when each of these can be demonstrated:
    `partial: true`; a failure on page 1 returns `502`.
 7. Results already in the database are marked saved and carry their URL.
 8. Saving a new Place ID returns `201` with `created: true`, a merchant id, a
-   slug, and an absolute URL.
-9. That URL, opened, redirects to `/r/:token` and the reviewer shows the
+   slug, an absolute URL, and `subscription: null`.
+9. That URL, opened *before* subscribing, redirects to `/unavailable`. After a
+   30-day subscription it redirects to `/r/:token` and the reviewer shows the
    merchant's name.
 10. The saved merchant has `google_place_id`, `google_rating`,
     `google_review_count`, `google_synced_at` and `source = 'GOOGLE_PLACES'`.
@@ -562,16 +781,38 @@ The MVP is complete when each of these can be demonstrated:
     `business_summary` and `experience_topics`.
 12. Saving the same Place ID again returns `200`, `created: false`, the same
     merchant id and URL, and **no column on that row has changed**.
-13. Saving a Place ID belonging to an ARCHIVED merchant returns that merchant
-    with `url: null` and does not reactivate it.
+13. Saving a Place ID belonging to a merchant whose subscription is CANCELLED
+    returns that merchant with the subscription unchanged, and does not
+    reactivate or renew it.
 14. Two merchants with the same name and city receive distinct slugs.
 15. The saved list returns previously saved merchants newest first, with no
-    Google call.
+    Google call, each carrying its subscription status and expiry.
 16. The editor saves all eight context fields, stores blanks as `null`, and
-    rejects `custom_instructions` containing a URL with the same message
-    `seed.py` produces.
+    rejects `custom_instructions` containing a URL.
 17. After editing, a new session for that merchant produces suggestions
     grounded in the edited context.
+18. Subscribing a merchant for 30 days on 12 Aug stores an expiry whose last
+    valid day is 11 Sep, and the list renders **11 Sep**.
+19. Renewing that merchant for 30 more days on 3 Sep produces a last valid day
+    of 11 Oct, not 3 Oct.
+20. Renewing a merchant whose subscription lapsed a month ago produces a last
+    valid day 30 days from today, not 30 days from the old expiry.
+21. `PATCH` to `CANCELLED` closes the URL and leaves `expiresAt` unchanged;
+    `PATCH` back to `ACTIVE` reopens it with the same `expiresAt`.
+22. A session created while active survives its full TTL even after the
+    subscription expires mid-session.
+27. The saved list shows a subscription's status and last valid day but offers
+    no control that changes either; the editor page offers both.
+28. The editor's Subscribe/Renew button names its term — "Renew 7 days" — and
+    sends that many days. The number comes from `DEFAULT_TERM_DAYS`; nothing
+    restates it.
+23. `durationUnit: "month"` returns `400 unsupported_duration_unit`;
+    `duration: 0` returns `400 invalid_request`.
+24. `POST` returns `201` on the first subscription and `200` on a renewal.
+25. Renewing a CANCELLED subscription moves `lastValidDay` and leaves the status
+    CANCELLED — the URL stays shut until a `PATCH` to ACTIVE.
+26. `PATCH` on a never-subscribed merchant returns `404
+    subscription_not_found`; an unknown status returns `400 invalid_request`.
 
 ---
 
@@ -580,13 +821,18 @@ The MVP is complete when each of these can be demonstrated:
 Deferred, with the reason where it is not obvious:
 
 * **Authentication and authorization** — L10, accepted risk, §2.1.12
-* URL regeneration and disabling — the URL is the primary key; there is no
-  token to rotate
+* URL regeneration — the URL is the primary key; there is no token to rotate.
+  *Disabling is no longer out of scope*: `PATCH …/subscription` to `CANCELLED`
+  or `PAUSED` closes the URL while leaving it addressable
 * Merchant-data refresh — including on re-save, which is why L8 forbids it
 * Using Google review texts as AI grounding — a different authenticity position
   than R1's "merchant context only", to be decided on purpose rather than by
   field mask
-* Editing merchant fields (name, category, status, review URL override)
+* Editing merchant fields (name, category, review URL override)
+* Expiry warnings — no job, no email, no dashboard alert. The saved list is the
+  only place a lapsing subscription is visible (DECISIONS.md S1)
+* Subscription history, invoicing, and payment capture — one row per merchant,
+  mutated in place (R19)
 * Sales representative assignment, lead ownership, lead scoring
 * Recent review activity filtering, historical review tracking
 * Automated crawling, scheduled searches, saved searches
@@ -611,15 +857,28 @@ Per R15a — if a failure means "the code is wrong" it is a unit test; if it mea
 * Place Details → context mapping: editorial summary present, absent (fallback
   sentence), and the true-only atmosphere selection
 * unresolvable geocode → `400`
-* context editor validation, shared with `seed.py`
+* context editor validation
+* term arithmetic: create, renew-while-active, renew-after-lapse, and a term
+  crossing a DST boundary landing on local midnight rather than 23:00 or 01:00
+* the gate: no row, `ACTIVE` but expired, `CANCELLED`, `PAUSED`, and the
+  `now == expires_at` boundary, which is **inactive** (the comparison is `<`)
+* `durationUnit: "month"` → `400 unsupported_duration_unit`
 
 **Integration** (`tests/integration/`, real Postgres):
 
 * the partial unique index on `google_place_id` rejects a second insert
 * `slug` uniqueness rejects a collision the generator failed to avoid
 * create-or-read: a second save returns the existing row **with every column
-  unchanged**
+  unchanged**, including its subscription
 * the new `source` CHECK constraint rejects an unknown value
+* `UNIQUE (merchant_id)` on `subscriptions` rejects a second row
+* the `status`, `duration_unit` and `duration > 0` CHECK constraints reject
+  their bad values
+* `ON DELETE CASCADE` removes the subscription with its merchant — use a
+  merchant that has never had a session, since `smart_review_sessions` and
+  `smart_review_events` hold non-cascading FKs to `merchants` and block the
+  delete outright
+* the backfill migration leaves every pre-existing merchant reachable
 
 ---
 

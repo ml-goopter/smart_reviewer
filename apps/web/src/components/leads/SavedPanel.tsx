@@ -15,6 +15,20 @@ function day(iso: string, locale: string): string {
   })
 }
 
+/** `lastValidDay` is a plain `YYYY-MM-DD` the server already resolved in the
+ *  operator's timezone. Parsed as UTC noon rather than passed to `new Date()`
+ *  directly: a bare date string is parsed as UTC midnight, which in any
+ *  negative-offset zone renders as the previous day — the exact off-by-one this
+ *  field exists to prevent. */
+function lastDay(isoDate: string, locale: string): string {
+  const [y = 0, m = 1, d = 1] = isoDate.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString(locale, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 /** Matches the API's own default `limit`. It is also the yardstick for whether
  *  another page exists, so the two must not drift apart. */
 const PAGE_SIZE = 50
@@ -37,6 +51,7 @@ function append(
 export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void }) {
   const leads = useMessages().leads
   const t = leads.saved
+  const sub = leads.subscription
   const { locale } = useLocale()
 
   const [merchants, setMerchants] = useState<SavedMerchant[] | null>(null)
@@ -108,11 +123,11 @@ export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void })
 
   return (
     <>
-      <table className="lead-table">
+      <table className="lead-table lead-table--saved">
         <thead>
           <tr>
             <th>{t.merchant}</th>
-            <th>{t.status}</th>
+            <th>{sub.heading}</th>
             <th>{t.savedOn}</th>
             <th />
           </tr>
@@ -126,12 +141,29 @@ export function SavedPanel({ onEdit }: { onEdit: (merchantId: string) => void })
                   {merchant.city ?? '—'} · {merchant.slug}
                 </span>
               </td>
-              <td>{merchant.status}</td>
+              {/* Read-only here. Changing a subscription is a deliberate act
+                  with money behind it, so it lives on the merchant's own page
+                  rather than one row of a fifty-row table. */}
+              <td>
+                {merchant.subscription == null ? (
+                  <span className="lead-sub">{sub.notSubscribed}</span>
+                ) : (
+                  <>
+                    <span className="lead-name">
+                      {merchant.subscription.status}
+                    </span>
+                    {/* The last valid day, never the stored expiry — that one
+                        names the first day the link is dead. */}
+                    <span className="lead-sub">
+                      {sub.expires}{' '}
+                      {lastDay(merchant.subscription.lastValidDay, locale)}
+                    </span>
+                  </>
+                )}
+              </td>
               <td>{day(merchant.createdAt, locale)}</td>
               <td className="lead-actions">
-                {merchant.url === null ? (
-                  <span className="lead-sub">{leads.noUrl}</span>
-                ) : (
+                {merchant.url !== null && (
                   <CopyButton url={merchant.url} label={leads.copyUrl} />
                 )}
                 <button

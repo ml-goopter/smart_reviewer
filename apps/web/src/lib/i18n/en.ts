@@ -229,16 +229,17 @@ export const en = {
       alreadySaved: (name: string) =>
         `${name} was already saved — the existing row is unchanged.`,
       /** The save found a row whose status means the URL is dead. The server
-       *  sends prose for this; it is derived from the status alone, so it is
-       *  written here instead — English prose under a Chinese header is worse
-       *  than one round trip's worth of duplication. */
-      willNotOpen: (name: string, status: string) =>
-        `${name}: ${status.toLowerCase()} — this URL will not open`,
+       *  sends no prose for this: a saved merchant is inert until subscribed,
+       *  and the sentence saying so belongs in the locale rather than in an
+       *  English string under a Chinese header. */
+      notSubscribed: (name: string) =>
+        `${name}: not subscribed — this URL will not open until it is`,
     },
 
     saved: {
       merchant: 'Merchant',
-      status: 'Status',
+      /** Column header over the subscription state and its last valid day. */
+      subscription: 'Subscription',
       /** Column header over the date a merchant was saved. */
       savedOn: 'Saved',
       failed: 'Could not load saved merchants.',
@@ -246,6 +247,29 @@ export const en = {
       empty: 'Nothing saved yet. Run a search to add one.',
       loadMore: 'Load more',
       loadingMore: 'Loading…',
+    },
+
+    /** Shared: the saved list shows these, the editor acts on them. */
+    subscription: {
+      heading: 'Subscription',
+      /** A merchant that has never been subscribed. Its URL does not open. */
+      notSubscribed: 'not subscribed',
+      /** Prefixed to the LAST VALID DAY, not to the stored `expiresAt`. That
+       *  timestamp is the midnight *starting* the day after, so "Expires 12 Sep"
+       *  would promise a day the link does not work. "Expires 11 Sep 2026" is
+       *  the true statement: it works all of the 11th and dies at its end.
+       *  The year is shown because a term can run past one. */
+      expires: 'Expires',
+      subscribe: (days: number) => `Subscribe ${days} days`,
+      renew: (days: number) => `Renew ${days} days`,
+      suspend: 'Suspend',
+      resume: 'Resume',
+      failed: 'Could not update the subscription.',
+      /** Says what Renew will do, because the answer is not "today + N": an
+       *  early renewal adds to the days already paid for. */
+      renewNote: 'Renewing adds to the days remaining — it never replaces them.',
+      /** Renew is offered on a suspended merchant, and does not reopen the URL. */
+      suspendedNote: 'Suspended. The term is still running; only Resume reopens the URL.',
     },
 
     copy: {

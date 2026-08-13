@@ -63,7 +63,9 @@ def test_a_saved_lead_round_trips_through_the_real_schema(db):
     # numeric(2,1) round-trips as Decimal, not as a float that has drifted.
     assert stored.google_rating == Decimal("4.2")
     assert stored.source == "GOOGLE_PLACES"
-    assert stored.status == "ACTIVE"
+    # Saved, and inert: a crawled lead is a prospect, not a customer, so its
+    # URL stays shut until somebody subscribes it.
+    assert stored.subscription is None
 
 
 def test_context_is_stored_approved_and_readable_as_jsonb(db):

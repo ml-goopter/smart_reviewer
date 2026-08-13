@@ -15,6 +15,8 @@ import type {
   SaveMerchantResponse,
   SavedMerchant,
   SearchCriteria,
+  Subscription,
+  SubscriptionStatus,
 } from './leadTypes'
 
 export class LeadFailure extends Error {
@@ -85,6 +87,46 @@ export function fetchSaved(
   offset = 0,
 ): Promise<{ merchants: SavedMerchant[] }> {
   return request(`/api/leads/merchants?limit=${limit}&offset=${offset}`)
+}
+
+/** The default term the editor's Subscribe/Renew button grants. One length is
+ *  offered because only `day` is implemented and a picker is UI for a decision
+ *  nobody has asked to make yet; the endpoint itself takes any positive number
+ *  of days. The button labels interpolate this, so changing it here changes
+ *  what the operator is promised. */
+export const DEFAULT_TERM_DAYS = 7
+
+/** Creates or renews. Renewal extends from the later of the current expiry and
+ *  today, so pressing this early never burns days already paid for. It does not
+ *  reactivate a suspended subscription — that is setSubscriptionStatus. */
+export function subscribe(
+  merchantId: string,
+  duration = DEFAULT_TERM_DAYS,
+): Promise<Subscription> {
+  return request(
+    `/api/leads/merchants/${encodeURIComponent(merchantId)}/subscription`,
+    {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ duration, durationUnit: 'day' }),
+    },
+  )
+}
+
+/** Suspends or resumes. Never moves the expiry: the clock keeps running while a
+ *  subscription is suspended, so resuming is this and nothing else. */
+export function setSubscriptionStatus(
+  merchantId: string,
+  status: SubscriptionStatus,
+): Promise<Subscription> {
+  return request(
+    `/api/leads/merchants/${encodeURIComponent(merchantId)}/subscription`,
+    {
+      method: 'PATCH',
+      headers: json,
+      body: JSON.stringify({ status }),
+    },
+  )
 }
 
 export function fetchContext(merchantId: string): Promise<MerchantContext> {
