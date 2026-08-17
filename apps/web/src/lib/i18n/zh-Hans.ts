@@ -52,6 +52,10 @@ export const zhHans: Messages = {
     opening: '正在打开 Google。',
   },
 
+  fortune: {
+    heading: '每日签语',
+  },
+
   suggestions: {
     heading: '这次的体验如何？',
     lead: '以下几个示例，可以帮助您撰写评价。',

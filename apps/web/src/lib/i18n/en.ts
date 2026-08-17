@@ -65,6 +65,13 @@ export const en = {
     opening: 'Opening Google.',
   },
 
+  /* The fortune band above the suggestions. Only the header lives here — the
+   * fortunes themselves are their own corpus in lib/fortunes.ts, translated
+   * alongside their English rather than in three separate catalogues. */
+  fortune: {
+    heading: 'Daily Fortune',
+  },
+
   suggestions: {
     heading: 'How was your experience?',
     lead: 'Here are a few ideas to help you write your review.',

@@ -67,6 +67,7 @@ describe.each(CHINESE)('%s', (locale) => {
 
     inLocale(locale, <FortuneBlock fortune={fortune} />)
 
+    expect(screen.getByRole('heading', { name: messages.fortune.heading })).toBeTruthy()
     expect(screen.getByText(fortune[locale])).toBeTruthy()
     expect(screen.queryByText(fortune.en)).toBeNull()
   })

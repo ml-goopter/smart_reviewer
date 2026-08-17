@@ -506,9 +506,9 @@ The merchant identity stays first. It is what tells a customer who has just
 scanned a QR code that they reached the right business, and a decoration in
 front of that answer delays the only question they are actually asking.
 
-**It pushes the first _Use This Review_ down by 97px, or 119px for a fortune
-that wraps to two lines at 375px** (band, one rule, two 20px gaps). Eleven of
-the twenty-four wrap; every Chinese string fits on one line. That is the
+**It pushes the first _Use This Review_ down by about 119px, or 141px for a
+fortune that wraps to two lines at 375px** (band, its title, one rule, two 20px
+gaps). Eleven of the twenty-four wrap; every Chinese string fits on one line. That is the
 conversion action, and this is the cost the decision accepts: a fortune below
 the cards would be seen by nobody, and a fortune the customer must scroll past
 is the shape of the request.
@@ -590,13 +590,21 @@ there and why the whole entry is held rather than an index.
 
 ## Ornamental, deliberately
 
-It takes no focus, has no heading, and is not announced. `useFocusOnMount`
-still moves focus to the `<h2>` question on mount — the customer scanned a QR
-code to write a review, and a garnish must not stand between them and that.
+It takes no focus and is not announced. `useFocusOnMount` still moves focus to
+the `<h2>` question on mount — the customer scanned a QR code to write a
+review, and a garnish must not stand between them and that.
 
-It is **not** `aria-hidden`. It precedes the heading in DOM order, so it is
+It is **not** `aria-hidden`. It precedes the question in DOM order, so it is
 reachable in browse mode. The one group who cannot see it is not the group to
 tell it does not exist.
+
+**The band is titled — "Daily Fortune", from the catalogue like every other
+customer-facing word.** The title is a real `<h2>`, not a styled `div`: it is
+visible, so a band that looked titled to a sighted customer and arrived as a
+loose string everywhere else would be the lie. The cost is one extra stop when
+navigating by heading, ahead of the question, which is an honest description of
+what the screen now is. The fortunes themselves stay out of the catalogues —
+they are a corpus, translated beside their own English in `fortunes.ts`.
 
 Visually a tinted `--surface-2` band with no border, italic, suppressed to
 upright under `:lang(zh)` — CJK has no italic form and a synthesised one reads
