@@ -2,8 +2,10 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ReactElement } from 'react'
 
+import { FORTUNES } from '../lib/fortunes'
 import { CATALOGS, type Locale } from '../lib/i18n'
 import { LocaleProvider } from '../lib/i18n/context'
+import { FortuneBlock } from './FortuneBlock'
 import { SelectedReviewEditor } from './SelectedReviewEditor'
 import { GenerationNotice, SuggestionCard } from './SuggestionList'
 import { ErrorState, LoadingState, UnavailableState } from './states'
@@ -55,6 +57,18 @@ describe.each(CHINESE)('%s', (locale) => {
     )
 
     expect(screen.getByRole('button', { name: messages.card.use })).toBeTruthy()
+  })
+
+  /* Not from a catalogue — the corpus is its own file — but customer-facing
+   * copy all the same, and this is the sweep that catches a screen rendering
+   * English under a Chinese heading. */
+  it('fortune', () => {
+    const fortune = FORTUNES[0]
+
+    inLocale(locale, <FortuneBlock fortune={fortune} />)
+
+    expect(screen.getByText(fortune[locale])).toBeTruthy()
+    expect(screen.queryByText(fortune.en)).toBeNull()
   })
 
   it('cap notice names its own language', () => {

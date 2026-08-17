@@ -423,6 +423,14 @@ Example mobile UI:
 │             Pho 37             │
 │      Vietnamese Restaurant     │
 │                                │
+├────────────────────────────────┤
+│                                │
+│ ╭────────────────────────────╮ │
+│ │   The great way is simple. │ │
+│ ╰────────────────────────────╯ │
+│                                │
+├────────────────────────────────┤
+│                                │
 │     How was your experience?   │
 │                                │
 │ Here are a few ideas to help   │
@@ -462,6 +470,9 @@ Example mobile UI:
 ```
 
 The source requirements call for several suggestions, **Use This Review**, and **Generate More Suggestions** controls.
+
+The band under the merchant is the fortune (R21). It is decoration, drawn once
+per page load, and appears on this stage only.
 
 ---
 
@@ -1073,6 +1084,7 @@ MerchantEntryLoader
 
 ReviewerHeader
 MerchantIdentity
+FortuneBlock
 
 ReviewSuggestionList
 ReviewSuggestionCard
@@ -1345,12 +1357,14 @@ src/
 │   ├── Reviewer.tsx      stage machine: suggestions → selected → handoff
 │   ├── SuggestionList.tsx
 │   ├── SelectedReviewEditor.tsx
+│   ├── FortuneBlock.tsx  R21, suggestions stage only
 │   ├── GoogleHandoff.tsx
 │   ├── UnavailableLink.tsx
 │   └── states.tsx        LoadingState, InvalidSessionState, ErrorState
 ├── lib/
 │   ├── api.ts            four fetch wrappers
 │   ├── draft.ts          sessionStorage persistence
+│   ├── fortunes.ts       the corpus and the draw (R21)
 │   └── types.ts
 └── index.css             tailwind
 ```
