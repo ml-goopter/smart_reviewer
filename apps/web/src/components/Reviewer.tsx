@@ -48,9 +48,11 @@ export function Reviewer({ token }: { token: string }) {
 
   /* One fortune for the life of the page, drawn here.
    *
-   * `useState`, not a bare call: Strict Mode runs the initialiser twice and
-   * every re-render would otherwise re-draw. React keeps the first result, so
-   * the fortune is stable even though the draw itself is not called once.
+   * `useState`, not a bare call: this component re-renders on every generation
+   * and stage change, and a bare drawFortune() would re-draw on each one — the
+   * fortune would swap under a customer who pressed Generate more. Strict Mode
+   * double-invokes the initialiser on top of that, but React keeps the first
+   * result, so it changes nothing here.
    *
    * Deliberately above the locale-keyed <Stage> below: drawing it inside
    * Suggestions would re-roll on every language change and every return from
