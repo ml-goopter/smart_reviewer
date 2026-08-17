@@ -105,9 +105,22 @@ describe('the fortune block', () => {
     ).toBeTruthy()
   })
 
+  it('is titled, and the title is a real heading', async () => {
+    await mount()
+
+    const title = screen.getByRole('heading', { name: CATALOGS.en.fortune.heading })
+    const fortune = screen.getByText(FORTUNES[firstIndex]!.en)
+
+    expect(
+      title.compareDocumentPosition(fortune) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
   it('is not focused — the question still is', async () => {
     await mount()
 
+    // The title is a heading but not the focus target: the band is titled, not
+    // promoted ahead of the task.
     expect(document.activeElement?.className).toBe('question')
   })
 

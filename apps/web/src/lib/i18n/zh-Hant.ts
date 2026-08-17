@@ -54,6 +54,10 @@ export const zhHant: Messages = {
     opening: '正在開啟 Google。',
   },
 
+  fortune: {
+    heading: '每日籤語',
+  },
+
   suggestions: {
     heading: '這次的體驗如何？',
     lead: '以下幾個範例，可以幫助您撰寫評論。',

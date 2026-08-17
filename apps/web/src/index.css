@@ -103,8 +103,7 @@ body {
   max-width: 480px;
   margin: 0 auto;
   min-height: 100svh;
-  padding: calc(28px + env(safe-area-inset-top)) 22px
-    calc(30px + env(safe-area-inset-bottom));
+  padding: calc(28px + env(safe-area-inset-top)) 22px calc(30px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -115,7 +114,7 @@ body {
   overflow-x: hidden;
 }
 
-.app > * {
+.app>* {
   min-width: 0;
 }
 
@@ -234,6 +233,30 @@ body {
   border-radius: var(--radius);
   padding: 15px 16px;
   text-align: center;
+}
+
+/* The small-label idiom the design already uses for .category — monospace,
+ * uppercase, wide tracking — so the band reads as titled without competing
+ * with the merchant name above it or the question below. */
+.fortune__heading {
+  margin: 0 0 8px;
+  text-align: center;
+  font-family: var(--label);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Its own correction rather than joining the .btn/.link rule above: those sit
+ * at 12.5px and are lifted to 15px, which here would make the header larger
+ * than the 14.5px fortune under it. 13px keeps the label subordinate, and the
+ * tracking comes off — it is what makes a short Latin label read as deliberate
+ * and only makes CJK cramped. */
+:root:lang(zh) .fortune__heading {
+  font-size: 13px;
+  letter-spacing: 0.04em;
 }
 
 .fortune__text {
@@ -716,6 +739,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .scrim,
   .drawer {
     transition: none;
