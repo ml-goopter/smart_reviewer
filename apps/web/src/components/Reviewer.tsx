@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiFailure, completeSession, generateSuggestions, loadSession, selectSuggestion } from '../lib/api'
 import { clearDraft, loadDraft, saveDraft } from '../lib/draft'
+import { drawFortune, type Fortune } from '../lib/fortunes'
 import { useFocusOnMount } from '../lib/a11y'
 import { useLocale, useMessages } from '../lib/i18n/context'
 import type { Locale, Messages } from '../lib/i18n'
 import type { FailureKind, Session, Suggestion } from '../lib/types'
 import { ErrorState, LoadingState, UnavailableState } from './states'
+import { FortuneBlock } from './FortuneBlock'
 import { GenerationNotice, SuggestionCard, SuggestionSkeletons } from './SuggestionList'
 import { SelectedReviewEditor } from './SelectedReviewEditor'
 import { TopBar } from './TopBar'
@@ -43,6 +45,20 @@ export function Reviewer({ token }: { token: string }) {
   const [reviewText, setReviewText] = useState('')
 
   const [announcement, setAnnouncement] = useState('')
+
+  /* One fortune for the life of the page, drawn here.
+   *
+   * `useState`, not a bare call: Strict Mode runs the initialiser twice and
+   * every re-render would otherwise re-draw. React keeps the first result, so
+   * the fortune is stable even though the draw itself is not called once.
+   *
+   * Deliberately above the locale-keyed <Stage> below: drawing it inside
+   * Suggestions would re-roll on every language change and every return from
+   * the editor, so the fortune would shuffle under a customer who only asked
+   * to read the page in Chinese. Held as the whole entry, so a language change
+   * is a lookup into the fortune already drawn rather than a second draw —
+   * which is the only reason fortunes.ts keeps its translations together. */
+  const [fortune] = useState<Fortune>(drawFortune)
 
   /* Every generation costs money and one of a few cap slots, so concurrency is
    * guarded by a ref set synchronously before the first await — state would be
@@ -161,9 +177,9 @@ export function Reviewer({ token }: { token: string }) {
         setAnnouncement(
           kind === 'rate-limited' && language === localeRef.current
             ? capWording(
-                messagesRef.current,
-                suggestionsRef.current.some((item) => item.language === language),
-              )
+              messagesRef.current,
+              suggestionsRef.current.some((item) => item.language === language),
+            )
             : messagesRef.current.announce.generateFailed,
         )
       }
@@ -270,7 +286,7 @@ export function Reviewer({ token }: { token: string }) {
     // Deliberately not awaited and its failure deliberately ignored: this only
     // records which card was chosen. The editor already holds the text, and
     // blocking it on an analytics write would be a worse product.
-    selectSuggestion(token, suggestion.id).catch(() => {})
+    selectSuggestion(token, suggestion.id).catch(() => { })
   }
 
   function leaveForGoogle(textToCopy: string | null) {
@@ -289,7 +305,7 @@ export function Reviewer({ token }: { token: string }) {
       // (R9c): the customer always reaches Google, and on an insecure origin
       // they arrive without the text.
       try {
-        void navigator.clipboard?.writeText(textToCopy).catch(() => {})
+        void navigator.clipboard?.writeText(textToCopy).catch(() => { })
         reviewCopied = navigator.clipboard !== undefined
       } catch {
         reviewCopied = false
@@ -347,6 +363,7 @@ export function Reviewer({ token }: { token: string }) {
       <Stage
         key={locale}
         phase={phase}
+        fortune={fortune}
         editing={editing}
         reviewText={reviewText}
         originalText={originalText}
@@ -369,6 +386,7 @@ export function Reviewer({ token }: { token: string }) {
 
 function Stage({
   phase,
+  fortune,
   editing,
   reviewText,
   originalText,
@@ -386,6 +404,7 @@ function Stage({
   onSkip,
 }: {
   phase: Phase
+  fortune: Fortune
   editing: boolean
   reviewText: string
   originalText: string
@@ -426,6 +445,7 @@ function Stage({
         </>
       ) : (
         <Suggestions
+          fortune={fortune}
           merchantName={merchant.name}
           category={merchant.category}
           suggestions={suggestions}
@@ -442,6 +462,7 @@ function Stage({
 }
 
 function Suggestions({
+  fortune,
   merchantName,
   category,
   suggestions,
@@ -452,6 +473,7 @@ function Suggestions({
   onGenerate,
   onSkip,
 }: {
+  fortune: Fortune
   merchantName: string
   category: string | null
   suggestions: Suggestion[]
@@ -470,7 +492,6 @@ function Suggestions({
   return (
     <>
       <TopBar />
-
       <div className="stack">
         {/* Merchant name and category are data, not copy — they stay in
           * whatever language the merchant registered them in. */}
@@ -479,7 +500,8 @@ function Suggestions({
       </div>
 
       <hr className="divider" />
-
+      <FortuneBlock fortune={fortune} />
+      <hr className="divider" />
       <div className="stack">
         <h2 className="question" tabIndex={-1} ref={heading}>
           {messages.suggestions.heading}

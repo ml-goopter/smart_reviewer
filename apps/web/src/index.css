@@ -224,6 +224,42 @@ body {
   width: 100%;
 }
 
+/* --- fortune ------------------------------------------------------------- */
+
+/* Tinted and borderless, deliberately unlike .card: a white bordered block
+ * above the suggestion list would read as a fourth suggestion, and the tap it
+ * invites does nothing. Nothing in here is interactive. */
+.fortune {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 15px 16px;
+  text-align: center;
+}
+
+.fortune__text {
+  margin: 0;
+  /* Italic marks it as a quoted aside rather than instruction. Muted at 14.5px
+   * on --surface-2 is 4.9:1, which clears AA — it is a garnish, not a reason to
+   * ship text somebody cannot read. */
+  font-style: italic;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 34ch;
+  margin-inline: auto;
+  overflow-wrap: var(--wrap);
+}
+
+/* CJK has no italic form; browsers synthesise one by shearing the glyphs,
+ * which looks like a rendering fault rather than emphasis. The tint is then the
+ * only thing setting the block apart, and --surface-2 on --bg is 1.06:1 — the
+ * weakest surface separation in the app, and borderless unlike .card and
+ * .notice. Deliberate, but it is the first thing to revisit if the block reads
+ * as floating text in Chinese on a real screen. */
+:root:lang(zh) .fortune__text {
+  font-style: normal;
+}
+
 /* --- buttons ------------------------------------------------------------- */
 
 .btn {
